@@ -1,0 +1,163 @@
+-- Author: Florian Walsh
+-- This implementation is part of my master thesis. 
+-- A detailed package description is contained in the appendix of the thesis.
+
+Package $IdealComputationsZ
+
+Alias GBZ := $StrongGBasisZ;
+
+Define Intersect(...)
+	If Len(ARGV) = 1 And Type(ARGV[1]) = LIST Then
+		Return $.IntersectList(ARGV[1]);
+	Elif Len(ARGV) = 2 And Type(ARGV[1]) = IDEAL And Type(ARGV[2]) = IDEAL Then
+		Return $.IntersectCore(ARGV[1], ARGV[2]);
+	Else
+		Error("$idealComputationsZ.Intersect: Bad parameters");
+	EndIf;
+EndDefine;
+
+
+Define Saturation(I,J)
+		GeneratorsJ := Gens(J);
+		Intersection := $.SaturationPrinciple(I, GeneratorsJ[1]);
+		If Len(GeneratorsJ) > 1 Then
+			For K:=2  To Len(GeneratorsJ) Do
+				Saturation := $.SaturationPrinciple(I, GeneratorsJ[K]);
+				Intersection := $.Intersect(Intersection, Saturation);
+			Endfor;
+		EndIf;
+	Return Intersection;
+EndDefine;
+
+
+Define Colon(I, J)
+	GeneratorsJ := Gens(J);
+	Intersection := $.ColonPrinciple(I, GeneratorsJ[1]);
+	If Len(GeneratorsJ) > 1 Then
+		For K:=2  To Len(GeneratorsJ) Do
+			Colon := $.ColonPrinciple(I, GeneratorsJ[K]);
+			Intersection := $.Intersect(Intersection, Colon);
+		Endfor;
+	EndIf;
+	Return Intersection;
+EndDefine;
+
+
+Define ContainedIn(I,J)
+	GBJ := GBZ.MinimalGBasis(J);
+	Foreach Gen In Gens(I) Do
+		DivResult := GBZ.DivAlg(Gen, GBJ);
+		If DivResult <> 0 Then
+			Return False;
+		EndIf;
+	EndForeach;
+	Return True;
+EndDefine;
+
+
+--Computes the saturation I:<F>^\infty for the ideal I 
+--and the principle Ideal <F> in Z[x1,...,xn]
+Define SaturationPrinciple(I,F)
+	Num := NumIndets();
+	S ::= QQ[x[1..Num], t],Elim(t);
+	Using S Do
+		Phi := RMap([x[K] | K In 1..Num]);
+		I := Image(I, Phi);
+		F := Image(F, Phi);
+		Generators := Gens(I);
+		Append(Generators, F*t-1);
+		GB := GBZ.GBasis(Ideal(Generators));
+		Saturation := Ideal(GBZ.Minimalize($.RemoveElimVar(GB, t)));
+	EndUsing;
+	Indets := Indets();
+	Append(Indets, 0);
+	PhiInverse := RMap(Indets);
+	Saturation := Image(Saturation, PhiInverse);
+	Return Saturation;
+EndDefine;
+
+
+--Computes the colon ideal I:<F> for the ideal I 
+--and the principle Ideal <F> in Z[x1,...,xn]
+Define ColonPrinciple(I, F)
+	Intersection := $.Intersect(I, Ideal(F));
+	Generators := [];
+	Foreach Element In Gens(Intersection) Do
+		Append(Generators, Element/F);
+	EndForeach;
+	Return Ideal(GBZ.Minimalize(Generators));
+EndDefine;
+
+Define IntersectList(List)
+	If Len(List) < 2 Then
+		Return List[1];
+	EndIf;
+	Intersection := List[1];
+	For I := 2 To Len(List) Do
+		Intersection := $.IntersectCore(Intersection, List[I]);
+	EndFor;
+	Return Intersection;
+EndDefine;
+
+
+--Computes the intersection of ideals I,J in Z[x1,...,xn] using elimination
+Define IntersectCore(I, J)
+	Num := NumIndets();
+	S ::= QQ[x[1..Num], t],Elim(t);
+	Using S Do
+		Phi:=RMap([x[K] | K In 1..Num]);
+		I := Image(I, Phi);
+		J := Image(J, Phi);
+		GeneratorsI := Gens(I);
+		GeneratorsJ := Gens(J);
+		For K:= 1 To Len(GeneratorsI) Do
+			GeneratorsI[K] := t*GeneratorsI[K];
+		Endfor;
+		For K:= 1 To Len(GeneratorsJ) Do
+			GeneratorsJ[K] := (1-t)*GeneratorsJ[K];
+		Endfor;
+		Generators := Concat(GeneratorsI, GeneratorsJ);
+		L := Ideal(Generators);
+		GB := GBZ.MinimalGBasis(L);
+		Intersection := Ideal(GBZ.Minimalize($.RemoveElimVar(GB, t)));
+	EndUsing;
+	Indets := Indets();
+	Append(Indets, 0);
+	PhiInverse := RMap(Indets);
+	Intersection := Image(Intersection, PhiInverse);
+	Return Intersection;
+EndDefine;
+
+
+--Remove the generators containing the indeterminate "Indet" 
+--from the generators of the Groebner basis "GB"
+Define RemoveElimVar(GB, Indet)
+	Output := [];
+	For K := 1 To Len(GB) Do
+		Supp := Support(GB[K]);
+		ContainsT := False;
+		Foreach Element In Supp Do
+			If GBZ.IsDivisible(Element, Indet) Then
+				ContainsT := True;
+				Break;
+			EndIf;
+		EndForeach;
+		If Not ContainsT Then
+			Append(Output, GB[K]);
+		EndIf;
+	EndFor;
+	Return Output;
+EndDefine;
+
+
+Define IntersectionWithZ(Ideal)
+	GB := GBZ.MinimalGBasis(Ideal);
+	Foreach Element In GB Do
+		If Deg(Element) = 0 Then
+			Return Element;
+		EndIf;
+	EndForeach;
+	Return 0;
+EndDefine;
+
+EndPackage;

@@ -1,0 +1,101 @@
+-- Author: Florian Walsh
+-- This implementation is part of my master thesis.
+-- This file contains some examples
+
+-- Specify the path to the packages here
+-- Path := "/path/to/implementation/";
+Source Path+ "RingOfScalars/LinearSystems.cpkg";
+Source Path+ "RingOfScalars/BilinearPresentation.cpkg";
+Source Path+ "RingOfScalars/BilinearGenerators.cpkg";
+Source Path+ "RingOfScalars/FiniteZAlgebra.cpkg";
+Source Path+ "RingOfScalars/Hermite.cpkg";
+Source Path+ "PrimDec0/primDec0.cpkg";
+Source Path+ "PrimDec0/minPoly.cpkg";
+Source Path+ "ZComputations/IdealCompZ.cpkg";
+Source Path+ "ZComputations/StrongGBasisZ.cpkg";
+Source Path+ "ZComputations/fgZModule.cpkg";
+Source Path+ "HelpFunctions.cpkg";
+
+Alias ZA := $FiniteZAlgebra,
+    GBZ := $StrongGBasisZ,
+    ICZ := $IdealComputationsZ,
+    LS := $LinearSystems,
+    FGZ := $FGZModule;
+
+
+//matrix ring Mat([[1,0],[0,-1]]), Mat([[0,1],[0,0]]) commutator multiplication
+MaxRing := ZA.ZAlgebraMaxRing([[[0,0],[0,2]],[[0,-2],[0,0]]], [[3,0], [0,3]]);
+
+//previous example as direct sum with itself
+MaxRing := ZA.ZAlgebraMaxRing(
+[[[0,0,0,0],[0,2,0,0],[0,0,0,0],[0,0,0,0]],
+[[0,-2,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,2]],
+[[0,0,0,0],[0,0,0,0],[0,0,0,-2],[0,0,0,0]]],
+[[3,0,0,0],[0,3,0,0],[0,0,3,0],[0,0,0,3]]);
+
+//matrix ring Mat([[1,0],[0,1]]), Mat([[0,0],[0,1]]) regular multiplication (commutative)
+ZA.ZAlgebraMaxRing([[[1,0],[0,1]],[[0,1],[0,1]]], [[3,0], [0,3]]);
+
+//group ring F_5[V_4]
+ZA.ZAlgebraMaxRing(
+[[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],
+[[0,1,0,0],[1,0,0,0],[0,0,0,1],[0,0,1,0]],
+[[0,0,1,0],[0,0,1,0],[0,0,0,1],[0,1,0,0]],
+[[0,0,0,1],[0,0,1,0],[0,1,0,0],[1,0,0,0]]],
+[[5,0,0,0],[0,5,0,0],[0,0,5,0],[0,0,0,5]]);
+
+//group ring F_5[S_3]
+MaxRing := ZA.ZAlgebraMaxRing(
+[[[1,0,0,0,0,0],[0,1,0,0,0,0],[0,0,1,0,0,0],[0,0,0,1,0,0],[0,0,0,0,1,0],[0,0,0,0,0,1]],
+[[0,1,0,0,0,0],[0,0,1,0,0,0],[1,0,0,0,0,0],[0,0,0,0,1,0],[0,0,0,0,0,1],[0,0,0,1,0,0]],
+[[0,0,1,0,0,0],[1,0,0,0,0,0],[0,1,0,0,0,0],[0,0,0,0,0,1],[0,0,0,1,0,0],[0,0,0,0,1,0]],
+[[0,0,0,1,0,0],[0,0,0,0,0,1],[0,0,0,0,1,0],[1,0,0,0,0,0],[0,0,1,0,0,0],[0,1,0,0,0,0]],
+[[0,0,0,0,1,0],[0,0,0,1,0,0],[0,0,0,0,0,1],[0,1,0,0,0,0],[1,0,0,0,0,0],[0,0,1,0,0,0]],
+[[0,0,0,0,0,1],[0,0,0,0,1,0],[0,0,0,1,0,0],[0,0,1,0,0,0],[0,1,0,0,0,0],[1,0,0,0,0,0]]],
+[[5,0,0,0,0,0],[0,5,0,0,0,0],[0,0,5,0,0,0],[0,0,0,5,0,0],[0,0,0,0,5,0],[0,0,0,0,0,5]], True);
+
+--lie ring 1
+MaxRing := ZA.ZAlgebraMaxRing(
+[[[0,0,0,0],[0,1,0,0],[0,0,0,0],[0,0,0,0]],
+[[0,-1,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,1]],
+[[0,0,0,0],[0,0,0,0],[0,0,0,-1],[0,0,0,0]]],
+[[3,0,0,0],[0,0,3,0]]);
+
+--lie ring 2
+MaxRing := ZA.ZAlgebraMaxRing(
+[[[0,0,0,0,0],[0,1,0,0,0],[0,0,0,0,2],[0,0,0,0,0],[0,0,0,0,0]],
+[[0,5,0,0,0],[0,0,0,0,0],[0,0,0,0,3],[0,0,0,0,0],[0,0,0,0,0]],
+[[0,0,0,0,5],[0,0,0,0,4],[0,0,0,0,0],[0,0,1,0,0],[0,0,0,0,0]],
+[[0,0,0,0,0],[0,0,0,0,0],[0,0,2,0,0],[0,0,0,0,0],[0,0,0,0,0]],
+[[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]]],
+[[3,0,0,0,0],[0,6,0,0,0],[0,0,3,0,0],[0,0,0,7,0],[0,0,0,0,7]]);
+
+MaxRing := ZA.ZAlgebraMaxRing(
+[[[ 0, 0, 0, 0, 0 ],[ 0, 4, 0, 0, 0 ],[ 0, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 0 ],
+[ 0, 0, 0, 0, 0 ]],
+[[ 3, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 0
+ ]],
+[[ 0, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 0 ],[ 0, 0, 2, 0, 0 ],[ 0, 0, 0, 0, 0
+ ]],
+[[ 0, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 1 ],[ 0, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 0
+ ]],
+[[ 0, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 0 ],[ 0, 0, 0, 0, 0
+ ]]],
+[[0,0,0,0,0]]);
+
+
+MaxRing;
+N := Len(MaxRing.Generators);
+Use R ::= QQ[x[1..N]];
+Phi:= RMap([x[I] | I In 1..N]);
+I := Image(Ideal(MaxRing.Presentation), Phi);
+I;
+GBZ.MinimalGBasis(I);
+Idempotents := FGZ.Idempotents(I);
+Idempotents;
+ZA.Decompose(MaxRing.Generators, Idempotents, MaxRing.Relations);
+
+
+

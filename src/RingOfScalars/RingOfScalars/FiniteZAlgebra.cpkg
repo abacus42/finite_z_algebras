@@ -1,0 +1,330 @@
+-- Author: Florian Walsh
+-- This implementation is part of my master thesis. 
+-- A detailed package description is contained in the appendix of the thesis.
+
+Package $FiniteZAlgebra
+
+Alias 
+	HNF := $HermiteNF,
+	LS := $LinearSystems,
+	BM := $BilinearMap;
+	
+/*
+	MultCoeffs   <- List of lists of lists representing multiplication. We have 
+					a_i * a_j = MultCoeffs[i][j][1] a_1 + ... + MultCoeffs[i][j][n] a_n
+	RelCoeffs    <- Relations of the group R^+. Each relation such that c_1*a_1 + ... + c_n*a_n = 0 
+					has to be given as a list of coefficients [c_1, c_2, ..., c_n]
+	Computes a presentation of the maximal ring of scalars of a finite Z-algebra
+*/
+Define ZAlgebraMaxRing(...)
+	If Len(ARGV) = 2 Then
+		Return $.ZAlgebraMaxRingCore(ARGV[1], ARGV[2], False);
+	Elif Len(ARGV) = 3 Then
+		Return $.ZAlgebraMaxRingCore(ARGV[1], ARGV[2], ARGV[3]);
+	Else
+		Error("$finiteZAlgebra.ZAlgebraMaxRing: Bad parameters");
+	EndIf;
+EndDefine;
+
+Define ZAlgebraMaxRingCore(MultCoeffs, RelCoeffs, Identity)
+	N := Len(RelCoeffs[1]);
+	R1 ::= QQ[a[1..N], x[1..N]];
+	Using R1 Do
+		GroupGenerators := [a[I] | I In 1..N];
+		Indets := [x[I] | I In 1..N];
+		
+		Equations := $.LeftAnnihilator(N, MultCoeffs);
+		Mat := LS.CreateMatrix(GroupGenerators, Indets, Equations, RelCoeffs);
+		Sol := HNF.SolveDioph(Mat);
+		LeftAnn := LS.Interreduce(LS.Keep(N, Sol));
+		PrintLn("Left Annihilator: " + Sprint(LeftAnn));
+		
+		Equations := $.RightAnnihilator(N, MultCoeffs);
+		Mat := LS.CreateMatrix(GroupGenerators, Indets, Equations, RelCoeffs);
+		Sol := HNF.SolveDioph(Mat);
+		RightAnn := LS.Interreduce(LS.Keep(N, Sol));
+		PrintLn("Right Annihilator: " + Sprint(RightAnn));
+		
+		If Identity Then
+			N_Relations := RelCoeffs;
+			MapType := 0; // It is enough to compute Z(Sym(f)) for f:N x N -> M
+		ElIf RightAnn = LeftAnn Then
+			N_Relations := Concat(RelCoeffs, RightAnn);
+			MapType := 1; // It is enough to consider f:N/Ann x N/Ann -> M
+		Else
+			N_Relations := $.NRelations(N, RelCoeffs, LeftAnn, RightAnn);
+			MapType := 2; // Use most general map
+		EndIf;
+		N_Relations := LS.Interreduce(N_Relations);
+		If Len(N_Relations) = 0 Then
+			N_Relations := [NewList(N,0)];
+		EndIf;
+		PrintLn("Relations of N: " + Sprint(N_Relations));
+		
+		M_Image := MultCoeffs;
+		For I:= 1 To N Do
+			For J := 1 To N Do
+				$.ReduceTuple(M_Image[I][J], RelCoeffs);
+			EndFor;
+		EndFor;
+		M_GenTuples := Concat(Flatten(M_Image,1), RelCoeffs);
+		For I:= 1 To Len(M_GenTuples) Do
+			$.ReduceTuple(M_GenTuples[I], RelCoeffs);
+		EndFor;
+		M_GenTuples := LS.Interreduce(M_GenTuples);
+		M_Generators := $.ToPolys(M_GenTuples);
+		PrintLn("Generators of M: " + Sprint(M_Generators));
+		M := Len(M_Generators);
+		
+		M_MultCoeffs := [[] | I In 1..N];
+		For I := 1 To N Do
+			For J := 1 To N Do
+				L := NewList(M,0);
+				Image := M_Image[I][J];
+				If Image <> 0 Then
+					A := Transposed(Mat(M_GenTuples));
+					B := Transposed(Mat([Image]));
+					L := HNF.SolveDioph(A,B);
+				EndIf;
+				Append(M_MultCoeffs[I], L);
+			EndFor;
+		EndFor;
+	EndUsing;
+	
+	//Compute the relations of the group M
+	R2 ::= QQ[a[1..N], x[1..M]];
+	Using R2 Do
+		GroupGenerators := [a[I] | I In 1..N];
+		Indets := [x[I] | I In 1..M];
+		For I := 1 To M Do
+			M_Generators[I] := BringIn(M_Generators[I]);
+		EndFor;	
+		Equation := $.MRelEquation(N, M_Generators);
+		Mat := LS.CreateMatrix(GroupGenerators, Indets, Equation, RelCoeffs);
+		Sol := HNF.SolveDioph(Mat);
+		M_Relations := LS.Keep(Len(M_Generators), Sol);
+		//Reduce the relations
+		Hermite := HNF.HermiteNF(Mat(M_Relations));
+		M_Relations := List(Hermite.H);
+		M_Relations := LS.RemoveZero(M_Relations);
+		If Len(M_Relations) = 0 Then
+			M_Relations := [NewList(M,0)];
+		EndIf;
+		PrintLn("Relations of M:" + Sprint(M_Relations));
+	EndUsing;
+	
+	If MapType = 2 Then
+		//Compute the relations of the direct product MxM
+		M2_Relations := [];
+		Foreach Rel In M_Relations Do
+			Rel1 := Concat(Rel, NewList(M,0));
+			Rel2 := Concat(NewList(M,0), Rel);
+			Append(M2_Relations, Rel1);
+			Append(M2_Relations, Rel2);
+		EndForeach;
+		M2_Relations := MakeSet(M2_Relations);
+		PrintLn("Relations of MxM: " + Sprint(M2_Relations));
+		
+		M2_MultCoeffs := [[] | I In 1..2*N];
+		For I := 1 To 2*N Do
+			For J := 1 To 2*N Do
+				If I <=N And J > N Then
+					Padding := NewList(M,0);
+					Image := M_MultCoeffs[I][J-N];
+					Append(M2_MultCoeffs[I], Concat(Image,Padding));
+				ElIf I > N And J <= N Then
+					Padding := NewList(M,0);
+					Image := M_MultCoeffs[I-N][J];
+					Append(M2_MultCoeffs[I], Concat(Padding,Image));
+				Else
+					Append(M2_MultCoeffs[I], NewList(2*M,0));
+				EndIf;		
+			EndFor;
+		EndFor;		
+	EndIf;
+	
+	R3 ::= QQ[a[1..N], x[1..N, 1..N]];
+	Using R3 Do
+		GroupGenerators := [a[I] | I In 1..N];
+		Indets := [];
+		For I :=1 To N Do
+			For J := 1 To N Do
+				Append(Indets, x[I,J]);
+			EndFor;
+		EndFor;
+		Equations := $.MaxRingAlgebraEquations(N,MultCoeffs);
+		MaxRingAlgGens := LS.Solve(Equations, GroupGenerators, Indets, N_Relations, N_Relations, N);
+	EndUsing;
+	
+	If MapType = 0 Then
+		Gens := BM.BilinearGenerators(M_MultCoeffs, N_Relations, M_Relations, True);
+	ElIf MapType = 1 Then
+		Gens := BM.BilinearGenerators(M_MultCoeffs, N_Relations, M_Relations, False);
+	Else
+		Gens := BM.BilinearGenerators(M2_MultCoeffs, N_Relations, M2_Relations, False);
+	EndIf;
+	PrintLn("Generators of S(f_R): ");
+	Foreach Gen In Gens Do
+		PrintLn("	"+Sprint(Gen));
+	EndForeach;
+	Gens := [Flatten(L) | L In Gens];
+	Gens := LS.Intersect(MaxRingAlgGens, Gens, N_Relations);
+	Gens := BM.SplitGenerators(N, Gens);
+	PrintLn("Generators of S(R): ");
+	Foreach Gen In Gens Do
+		PrintLn("	"+Sprint(Gen));
+	EndForeach;
+	Presentation := BM.BilinearPresentation(Gens, N_Relations);
+	Generators := [Mat(G) | G In Gens];
+	-- 'Relations' are the relations of R/Ann or R/Ann_l x R/Ann_r not the relations of the max ring of scalars
+	Return Record[Presentation := Presentation, Generators := Generators, Relations := N_Relations];
+EndDefine;
+
+-- Returns equations defining the left annihilator
+Define LeftAnnihilator(N, MultCoeffs)
+	Equations := [];
+	For I := 1 To N Do
+		EQ := 0;
+		For K := 1 To N Do
+			For J := 1 To N Do
+				EQ := EQ + x[K] * MultCoeffs[K][I][J] a[J];
+			EndFor;
+		EndFor;
+		Append(Equations, EQ);
+	EndFor;
+	Return [EQ | EQ In Equations And EQ <> 0];
+EndDefine;
+
+-- Returns equations defining the right annihilator
+Define RightAnnihilator(N, MultCoeffs)
+	Equations := [];
+	For I := 1 To N Do
+		EQ := 0;
+		For K := 1 To N Do
+			For J := 1 To N Do
+				EQ := EQ + x[K] * MultCoeffs[I][K][J] a[J];
+			EndFor;
+		EndFor;
+		Append(Equations, EQ);
+	EndFor;
+	Return [EQ | EQ In Equations And EQ <> 0];
+EndDefine;
+
+-- Returns equations defining the relations of N
+Define NRelations(N, RelCoeffs, LeftAnn, RightAnn)
+	Relations := [];
+	Foreach Rel In RelCoeffs Do
+		Rel1 := Concat(NewList(N,0),Rel);
+		Rel2 := Concat(Rel, NewList(N,0));
+		Append(Relations, Rel1);
+		Append(Relations, Rel2);
+	EndForeach;
+	Foreach Gen In LeftAnn Do
+		Rel := Concat(Gen, NewList(N,0));
+		Append(Relations, Rel);
+	EndForeach;
+	Foreach Gen In RightAnn Do
+		Rel := Concat(NewList(N,0), Gen);
+		Append(Relations, Rel);
+	EndForeach;
+	Return Relations;
+EndDefine;
+
+-- Returns equations defining the relations of M
+Define MRelEquation(N, M_Generators)
+	Equation := 0;
+	For I := 1 To Len(M_Generators) Do
+		Equation := Equation + x[I] * M_Generators[I];
+	EndFor;
+	Return [Equation];
+EndDefine;
+
+Define MaxRingAlgebraEquations(N, MultCoeffs)
+	Equations := [];
+	For I := 1 To N Do
+		For J := 1 To N Do
+			EQ := 0;
+			For L := 1 To N Do
+				For K :=1 To N Do
+					EQ := EQ + MultCoeffs[L][J][K]*x[I,L]*a[K];
+				EndFor;
+			EndFor;
+			For K := 1 To N Do
+				For L :=1 To N Do
+					EQ := EQ + -MultCoeffs[I][J][K]*x[K,L]*a[L];
+				EndFor;
+			EndFor;
+			Append(Equations, EQ);
+		EndFor;
+	EndFor;
+	Return [EQ | EQ In Equations And EQ <> 0];
+EndDefine;
+
+
+Define Decompose(Generators, Idempotents, Relations)
+	Components := [];
+	Foreach Idem In Idempotents Do
+		Comp := $.IdempotentImage(Idem, Generators);
+		$.ReduceTuples(Comp, Relations);
+		Comp := LS.RemoveZero(MakeSet(Comp));
+		If Comp <> [] Then
+			Append(Components, Comp);
+		EndIf;
+	EndForeach;
+	Return Components;
+EndDefine;
+
+-- computes the image of an idempotent
+-- Generators <- generators of the maximal ring of scalars as matrices
+Define IdempotentImage(Idempotent, Generators)
+	N := Len(Generators[1]);
+	Image := NewMat(N,N,0);
+	Foreach Mon In Monomials(Idempotent) Do
+		Product := Identity(N);
+		If Deg(Mon) > 0 Then
+			Log := Log(Mon);
+			For I := 1 To Len(Generators) Do
+				Product := Product * Generators[I]^Log[I];
+			EndFor;
+		EndIf;
+		Product := Product * LC(Mon);
+		Image := Image + Product;
+	EndForeach;
+	Image := List(Image);
+	Image := MakeSet(Image);
+	Return LS.RemoveZero(Image);
+EndDefine;
+
+Define ToPolys(Tuples)
+	Polys := [];
+	Foreach Tuple In Tuples Do
+		Poly := 0;
+		For I := 1 To Len(Tuple) Do
+			Poly := Poly + Tuple[I]*a[I];
+		EndFor;
+		Append(Polys, Poly);
+	EndForeach;
+	Return Polys;
+EndDefine;
+
+Define ReduceTuple(Var Tuple, Relations)
+	Foreach Rel In Relations Do
+		Divisors := [];
+		For I := 1 To Len(Tuple) Do
+			If Rel[I] <> 0 Then
+				Append(Divisors, Div(Tuple[I], Rel[I]));
+			EndIf;
+		EndFor;
+		If Len(Divisors) > 0 Then
+			Tuple := Tuple - Min(Divisors) * Rel;
+		EndIf;
+	EndForeach;
+EndDefine;
+
+Define ReduceTuples(Var Tuples, Relations)
+	For I := 1 To Len(Tuples) Do
+		$.ReduceTuple(Tuples[I], Relations);
+	EndFor;
+EndDefine;
+
+EndPackage;

@@ -1,0 +1,397 @@
+Package $primDec0
+
+Alias
+	PD := $primDec0,
+	MP := $minPoly;
+
+Define About()
+  PrintLn "
+    Author: J. Danner
+    Date:  November 2017
+    Comment: Contains algorithms for computing primary decompositions of zero-dimensional ideals, and for checking ideals for maximality and primarity.
+  "
+EndDefine; -- About
+
+
+--IsMaximal - Las-Vegas-Alg. for infinite base fields.
+--Input: ideal I
+--Output: True or False indicating maximality of I
+--Note: I has to be an ideal in CurrentRing() and CoeffRing has to be a field.
+Define IsMaximal(I)
+	Return PD.IsMaximalCore(I,False);
+EndDefine;
+
+--IsPMaximal - Las-Vegas-Alg. for infinite base fields.
+--Input: ideal I
+--Output: True or False indicating maximality of I, the result my be incorrect in some rare cases.
+--Note: I has to be an ideal in CurrentRing() and CoeffRing has to be a field.
+Define IsPMaximal(I);
+	Return PD.IsMaximalCore(I,True);
+EndDefine;
+
+
+--IsPrimary0 - Las-Vegas-Alg. for infinite base fields.
+--Input: 0-dim ideal I
+--Output: True or False indicating primarity of I.
+--Note: I has to be an ideal in CurrentRing() and CoeffRing has to be a field.
+Define IsPrimary0(I)
+	Return PD.IsPrimary0Core(I,False);
+EndDefine;
+
+--IsPPrimary0 - Las-Vegas-Alg. for infinite base fields.
+--Input: 0-dim ideal I
+--Output: True or False indicating primarity of I, the result my be incorrect in some rare cases.
+--Note: I has to be an ideal in CurrentRing() and CoeffRing has to be a field.
+Define IsPPrimary0(I);
+	Return PD.IsPrimary0Core(I,True);
+EndDefine;
+
+
+--PrimDec0 - Las-Vegas-Alg. for infinite base fields.
+--Input: 0-dim ideal I, (optional) Bool B
+--Output: primary decomposition of I and its maximal components, if B is True.
+--Note: I has to be an ideal in CurrentRing() and CoeffRing has to be a field.
+Define PrimDec0(...)
+	If Len(ARGV)<1 Or Len(ARGV)>2 Then
+		Error("PrimDec0: False number of arguments. Input: Ideal, (optional) Boolean.");
+	Else
+		I:=ARGV[1];
+	EndIf;
+	Return PD.PrimDec0Core(I, False,Len(ARGV)=2 And ARGV[2]);
+EndDefine;
+
+--PPrimDec0 - Las-Vegas-Alg. for infinite base fields.
+--Input: 0-dim Ideal I, (optional) Bool B
+--Output: primary decomposition of I and its maximal components, if B is True; the result may be incorrect in some rare cases.
+--Note: I has to be an ideal in CurrentRing() and CoeffRing has to be a field.
+Define PPrimDec0(...)
+	If Len(ARGV)<1 Or Len(ARGV)>2 Then
+		Error("PPrimDec0: False number of arguments. Input: Ideal, (optional) Boolean.");
+	Else
+		I:=ARGV[1];
+	EndIf;
+	Return PD.PrimDec0Core(I, True,Len(ARGV)=2 And ARGV[2]);
+EndDefine;
+
+
+
+--functions not to be exported
+
+--auxFun: MinPolyQuot
+--Input: Bool UseHeu, poly F, 0-dim ideal I, indeterminate X, (optional) K-basis of P/I.
+--Output: minimal polynomial in CoeffRing[X] of F in P/I; if UseHeu is True, minimal polynomials are computed with a heuristic.
+Define MinPolyQuot(...)
+	--PrintLn "MinPolyQuot";
+	If Len(ARGV)=4 Then
+		CheckArgTypes("MinPolyQuot", [BOOL,POLY,IDEAL,POLY], ARGV);
+		UseHeu:=ARGV[1]; F:=ARGV[2]; I:=ARGV[3]; X:=ARGV[4]; QBasis:=PD.MyQuotientBasis(I);
+	Elif Len(ARGV)=5 Then
+		CheckArgTypes("MinPolyQuot", [BOOL,POLY,IDEAL,POLY,LIST], ARGV);
+		UseHeu:=ARGV[1]; F:=ARGV[2]; I:=ARGV[3]; X:=ARGV[4]; QBasis:=ARGV[5];
+	Else
+		Error("MinPolyQuot: False number of arguments. Input: Poly, Ideal, Poly, (optional) K-basis of P/I.");
+	EndIf;
+	
+	If Characteristic()=0 And UseHeu Then Return MP.MinPolyQuotMod(F,I,X,QBasis);
+	Else Return MP.MinPolyQuotDef(F,I,X,QBasis); EndIf;
+EndDefine; --MinPolyQuot
+	
+
+--IsPrimary0Core - Las-Vegas-Alg. for infinite base fields.
+--Input: 0-dim ideal I, Bool UseHeu
+--Output: True or False indicating primarity of I; if UseHeu is True, minimal polynomials are computed with a heuristic.
+Define IsPrimary0Core(I,UseHeu)
+	--PrintLn "PD.IsPrimary0";
+	J:=I;
+	D:=Multiplicity(CurrentRing()/J);
+	If D=0 Then Error("IsPrimary0Core: I has to be 0-dimensional."); EndIf;
+	--first loop
+	ForEach X In Indets() Do
+		M:=PD.MinPolyQuot(UseHeu,X,J,X);
+		Factorization:=PD.MyFactor(M);
+		If Len(Factorization)>1 Then Return False; EndIf;
+		If Deg(M)=D Then Return True; EndIf;
+		If Factorization[1][2]>2 Then --we know that M is a power of an irreducible factor
+			M:=Factorization[1][1];
+			J:=J+Ideal(M);
+			D:=Multiplicity(CurrentRing()/J);
+			If Deg(M)=D Then Return True; EndIf;
+		EndIf;
+	EndForEach;
+	If Characteristic()<>0 Then --CoeffRing is finite
+		S:=Len(PD.FrobBasis(J));
+		Return S=1;
+	Else	--CoeffRing is infinite
+		QBasis:=PD.MyQuotientBasis(J);
+		Bound:=2;
+		While True Do
+			L:=ScalarProduct([Indet(K) | K In 1..NumIndets()],[Rand(-Bound,Bound) | K In 1..NumIndets()]);
+			Bound:=Bound*2;
+			M:=PD.MinPolyQuot(UseHeu,L,J,Indet(1),QBasis);
+			If Not PD.IsIrred(M) Then Return False; EndIf;
+			If Deg(M)=D Then Return True; EndIf;
+		EndWhile;
+	EndIf;
+EndDefine; --IsPrimary0Core
+
+
+--auxFun: (needed as QuotientBasis fails to throw an error for I=Ideal(0) and does not store the computed GBasis with I.)
+--Input: (0-dim) ideal I
+--Output: K-basis of P/I, and error if I is not 0-dim.
+Define MyQuotientBasis(Var I)
+	--PrintLn "PD.MyQuotientBasis";
+	If I=Ideal(0) Or I=Ideal(1) Then Error("MyQuotientBasis: argument must be a 0-dim ideal"); EndIf;
+	NoPrint:=GBasis(I); --store GBasis in I (QuotientBasis does not do that!)
+	Return QuotientBasis(I);
+EndDefine; --MyQuotientBasis
+
+
+--FrobMat
+--Input: 0-dim ideal I, (optional) K-basis of P/I
+--Output: matrix representation of q-Frobenius-endomorphism.
+--Note: K has to be a finite field.
+Define FrobMat(...)
+	If Len(ARGV)=1 Then
+		I:=ARGV[1]; QBasis:=PD.MyQuotientBasis(I);
+	Elif Len(ARGV)=2 Then
+		I:=ARGV[1]; QBasis:=ARGV[2];
+	EndIf;
+	--PrintLn "PD.FrobMat";
+	P:=Characteristic();
+	If P=0 Then Error("FrobMat: Base field has to be finite."); EndIf;
+	If Len(QBasis)=1 Then QBasis:=[0]; EndIf;
+	FM:=NewList(Len(QBasis));
+	FM[1]:=Poly(1); --store Phi_q(QBasis[Ii]) as polynomial
+	FM2:=NewList(Len(QBasis));
+	FM2[1]:=E_(1,Len(QBasis)); --store coefficients of Phi_q(QBasis[Ii])
+	For Ii:=2 To Len(QBasis) Do --Ii=1 not needed, as first row is already correct.
+		J:=Ii-1;
+		While J>1 Do
+			If NR(QBasis[Ii],[QBasis[J]])=0 Then Break; EndIf;
+			J:=J-1;
+		EndWhile;
+		--we have a slightly different computations here since we always have K<J for J<>1.
+		If J=1 Then
+			FM[Ii]:=PD.NFpower(QBasis[Ii],P,I);
+		Else
+			K:=1;
+			While K<J Do
+				If QBasis[Ii]/QBasis[J]=QBasis[K] Then Break; EndIf;
+				K:=K+1;
+			EndWhile;
+			FM[Ii]:=NF(FM[J]*FM[K],I);
+		EndIf;
+		
+		FM2[Ii]:=Vector([$builtin.CoeffOfTerm(FM[Ii],T) | T In QBasis]);
+		--PrintLn "Row #"+Sprint(Ii);
+	EndFor;
+	Return Transposed(Mat(FM2));
+EndDefine; --FrobMat
+
+
+--auxFun: compute powers in P/I with square-and-multiply-stategy.
+--Input: polynomial F, power P, ideal I
+--Output: NF(F^P,I)
+Define NFpower(F,P,I)
+	If P=0 Then Return BringIn(1); EndIf;
+	If P=1 Then Return NF(F,I); EndIf;
+	If Mod(P,2)=0 Then Return PD.NFpower(NF(F^2,I), Div(P,2), I);
+	Else Return NF(PD.NFpower(NF(F^2,I), Div(P,2), I)*F, I);
+	EndIf;
+EndDefine; --NFPower
+
+
+--auxFun: check if a polynomial F is irreducible
+--Input: polynomial F
+--Output: True or False indicating irreducibility of F.
+Define IsIrred(F) 
+	Fac:=PD.MyFactor(F);
+	Return Len(Fac)=1 And Fac[1][2]=1;
+EndDefine; --IsIrred
+
+
+--IsMaximalCore - Las-Vegas-Alg. for infinite base fields.
+--Input: ideal I, Bool UseHeu
+--Output: True or False indicating maximality of I; if UseHeu is True, minimal polynomials are computed with a heuristic.
+Define IsMaximalCore(I,UseHeu)
+	--PrintLn "PD.IsMaximal";
+  	Catch QBasis:=PD.MyQuotientBasis(I); In E EndCatch;
+  	If Type(E)=ERROR Then
+  		Return False; --I is not 0-dim ideal
+	EndIf;
+	
+	D:=Len(QBasis);
+	ForEach X In Indets() Do
+		M:=PD.MinPolyQuot(UseHeu,X,I,X,QBasis);
+		If Not PD.IsIrred(M) Then Return False;
+		ElIf Deg(M)=D Then Return True; EndIf;
+	EndForEach;
+	If Characteristic()<>0 Then --CoeffRing is finite
+		FMat:=PD.FrobMat(I,QBasis);
+		S:=D-Rank(FMat-BringIn(Identity(D)));
+		Return S=1;
+	Else	--CoeffRing is infinite
+		Bound:=2;
+		While True Do
+			L:=ScalarProduct([Indet(K) | K In 1..NumIndets()],[Rand(-Bound,Bound) | K In 1..NumIndets()]);
+			Bound:=Bound+1; --(4.1)
+			M:=PD.MinPolyQuot(UseHeu,L,I,Indet(1),QBasis);
+			If Not PD.IsIrred(M) Then Return False; EndIf;
+			If Deg(M)=D Then Return True; EndIf;
+		EndWhile;
+	EndIf;
+EndDefine; --IsMaximalCore
+
+	
+--PDSplitting - Las-Vegas-Alg. for infinite base field.
+--Input: 0-dim ideal I, Bool UseHeu, Bool RetMax
+--Output: decomposition of I with at least two components, if I is not-primary. If UseHeu is True, minimal polynomials are computed with a heuristic. If RetMax is True, returns maximal components as well.
+Define Splitting(I,UseHeu,RetMax)
+	--PrintLn "PD.Splitting";
+	QBasis:=PD.MyQuotientBasis(I);
+	D:=Len(QBasis);
+	If D=0 Then Error("Splitting: I has to be 0-dimensional"); EndIf;
+	MiSqfr:=[];		
+	ForEach Xi In Indets() Do --Xi:=x; UseHeu:=True;
+		M:=PD.MinPolyQuot(UseHeu,Xi,I,Xi,QBasis);
+		Fact:=PD.MyFactor(M);
+		If Deg(M)=D Or Len(Fact)>1 Then
+			PComps:=[I+Ideal(Fct) | Fct In [Fct[1]^Fct[2] | Fct In Fact]];
+			If RetMax Then
+				MComps:=[I+Ideal(Fct) | Fct In [Fct[1] | Fct In Fact]];
+				Return Record[PC:=[Ideal(Interreduced(PrC.Gens)) | PrC In PComps], MC:=[Ideal(Interreduced(MaxC.Gens)) | MaxC In MComps], IsTotalSplit:=(Deg(M)=D)]; --(3)				
+			Else
+				Return Record[PC:=[Ideal(Interreduced(PrC.Gens)) | PrC In PComps], IsTotalSplit:=(Deg(M)=D)];
+			EndIf;
+		EndIf;
+		Append(MiSqfr,Product([Fct[1] | Fct In Fact])); --store sqfree minPoly for later 
+	EndForEach;
+	If Characteristic()<>0 Then --CoeffRing is finite 
+		Return PD.SplittingFinField(UseHeu,RetMax,I,QBasis);
+	Else --CoeffRing is infinite
+		J:=I+Ideal(MiSqfr);
+		If PD.IsMaximalCore(J,UseHeu) Then
+			If RetMax Then
+				Return Record[PC:=[I], MC:=[J], IsTotalSplit:=True];
+			Else 
+				Return Record[PC:=[I], IsTotalSplit:=True];
+			EndIf;
+		Else
+			Return PD.SplittingInfinField(UseHeu,RetMax,I,QBasis);
+		EndIf;
+	EndIf;
+EndDefine; --Splitting
+
+	
+--auxFun: MyFactor
+--Input: monic polynomial F (no input check!)
+--Output: factorization of F where each factor has deg<>0. (in contrast to Factor(F), where there sometimes is a factor with deg=0)
+Define MyFactor(F)
+	MyFct:=[ [Fct[1]/LC(Fct[1]), Fct[2]] | Fct In Factor(F) And Deg(Fct[1])<>0];
+	If Len(MyFct)=0 Then Return [[F,1]];
+	Else Return MyFct; EndIf;
+EndDefine; --MyFactor
+
+
+--SplittingFinField
+--Input: Bool UseHeu, Bool RetMax, 0-dim ideal, (optional) K-basis of P/I 
+--Output: decomposition of I with at least two components, if I is not-primary. If UseHeu is True, minimal polynomials are computed with a heuristic. If RetMax is True, returns maximal components as well.
+--Note: K has to be a finite field.
+Define SplittingFinField(...)
+	If Len(ARGV)=3 Then
+		UseHeu:=ARGV[1]; RetMax:=ARGV[2]; I:=ARGV[3]; QBasis:=PD.MyQuotientBasis(I);
+	Elif Len(ARGV)=4 Then
+		UseHeu:=ARGV[1]; RetMax:=ARGV[2]; I:=ARGV[3]; QBasis:=ARGV[4];
+	EndIf;
+	--PrintLn "PDSplitFinField";
+	FrB:=PD.FrobBasis(I);
+	S:=Len(FrB);
+	If S=1 Then
+		If RetMax Then Return Record[PC:=[I], MC:=[Radical(I)], IsTotalSplit:=True];
+		Else Return Record[PC:=[I],IsTotalSplit:=True];
+		EndIf;
+	EndIf;
+	F:=FrB[1];
+	If Deg(F)=0 Then F:=Last(FrB); EndIf;
+	M:=PD.MinPolyQuot(UseHeu,F,I,Indet(1),QBasis);
+	Fact:=PD.MyFactor(M);
+	PComps:=[I+Ideal(Subst(Fct[1],Indet(1),F)) | Fct In Fact];
+	If RetMax Then
+		MComps:=[I+Ideal(Subst(Fct,Indet(1),F)) | Fct In [Fct[1] | Fct In Fact]];
+		Return Record[PC:=[Ideal(Interreduced(PrC.Gens)) | PrC In PComps], MC:=[Ideal(Interreduced(MaxC.Gens)) | MaxC In MComps], IsTotalSplit:=(Deg(M)=S)]; --(3)				
+	Else
+		Return Record[PC:=[Ideal(Interreduced(PrC.Gens)) | PrC In PComps], IsTotalSplit:=(Deg(M)=S)];
+	EndIf;
+EndDefine; --SplittingFinField
+
+
+--auxFun: FrobBasis
+--Input: 0-dim ideal, (optional) K-basis of P/I 
+--Output: K-basis of Frob_q(P/I).
+--Note: K has to be a finite field.
+Define FrobBasis(...)
+	If Len(ARGV)=1 Then
+		I:=ARGV[1]; QBasis:=PD.MyQuotientBasis(I);
+	Elif Len(ARGV)=2 Then
+		I:=ARGV[1]; QBasis:=ARGV[2];
+	EndIf;
+	--PrintLn "PD.FrobBasis";
+	FMat:=PD.FrobMat(I,QBasis);
+	C:=LinKerModP(FMat-Identity(Len(QBasis)));
+	Return [ScalarProduct(QBasis, Cv) | Cv In C];
+EndDefine; --FrobBasis
+
+
+--SplittingInfinField - Las-Vegas-Alg.
+--Input: Bool UseHeu, Bool RetMax, 0-dim non-primary Ideal, (optional) K-basis of P/I 
+--Output: decomposition of I with at least two components. If UseHeu is True, minimal polynomials are computed with a heuristic. If RetMax is True, returns maximal components as well.
+--Note: K has to be a infinite field and I not primary.
+Define SplittingInfinField(...)
+	If Len(ARGV)=3 Then
+		UseHeu:=ARGV[1]; RetMax:=ARGV[2]; I:=ARGV[3]; QBasis:=PD.MyQuotientBasis(I);
+	Elif Len(ARGV)=4 Then
+		UseHeu:=ARGV[1]; RetMax:=ARGV[2]; I:=ARGV[3]; QBasis:=ARGV[4];
+	EndIf;
+	
+	--PrintLn "PDSplitInfField";
+	D:=Multiplicity(CurrentRing()/I);
+	Bound:=2;
+	While True Do
+		L:=ScalarProduct([Indet(K) | K In 1..NumIndets()],[Rand(-Bound,Bound) | K In 1..NumIndets()]);
+		Bound:=Bound+1;
+		M:=PD.MinPolyQuot(UseHeu,L,I,Indet(1),QBasis);
+		Fact:=PD.MyFactor(M);
+		If Deg(M)=D Or Len(Fact)>1 Then 
+			PComps:=[I+Ideal(Subst(Fct,Indet(1),L)) | Fct In [Fct[1]^Fct[2] | Fct In Fact]];
+			If RetMax Then
+				MComps:=[I+Ideal(Subst(Fct,Indet(1),L)) | Fct In [Fct[1] | Fct In Fact]];
+				Return Record[PC:=[Ideal(Interreduced(PrC.Gens)) | PrC In PComps], MC:=[Ideal(Interreduced(MaxC.Gens)) | MaxC In MComps], IsTotalSplit:=(Deg(M)=D)]; --(3)	
+			Else
+				Return Record[PC:=[Ideal(Interreduced(PrC.Gens)) | PrC In PComps], IsTotalSplit:=(Deg(M)=D)]; --(3)
+			EndIf;	
+		EndIf;
+	EndWhile;
+EndDefine; --SplittingInfinField
+
+
+--PrimDec0Core - Las-Vegas-Alg. for infinite base fields.
+--Input: 0-dim ideal, Bool UseHeu, Bool RetMax
+--Output: primary decomposition of I. If UseHeu is True, minimal polynomials are computed with a heuristic. If RetMax is True, returns maximal components as well.
+Define PrimDec0Core(I,UseHeu,RetMax)
+	--PrintLn "PD.PrimDec0";
+	Split:=PD.Splitting(I,UseHeu,RetMax);
+	If RetMax Then
+		If Split.IsTotalSplit Then Return Record[PC:=Split.PC, MC:=Split.MC]; EndIf;
+		MaxComps:=[]; PrimComps:=[];
+		ForEach J In Split.PC Do
+			PDec:=PD.PrimDec0Core(J,UseHeu,RetMax);
+			PrimComps:=Concat(PrimComps,PDec.PC); MaxComps:=Concat(MaxComps,PDec.MC);
+		EndForEach;
+		Return Record[PC:=PrimComps, MC:=MaxComps];
+	Else
+		If Split.IsTotalSplit Then Return Split.PC; EndIf;	
+		Return Flatten([PD.PrimDec0Core(J,UseHeu,RetMax) | J In Split.PC]);
+	EndIf;
+EndDefine; --PrimDec0Core
+
+EndPackage;

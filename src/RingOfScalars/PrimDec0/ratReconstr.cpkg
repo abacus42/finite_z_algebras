@@ -1,0 +1,52 @@
+Package $ratReconstr
+
+Define About()
+  PrintLn "
+    Author: J. Danner
+    Date:  November 2017
+    Comment: Contains algorithms for reconstructing rationals from modular numbers in a probabilistic way.
+  "
+EndDefine; -- About
+
+
+--HRR - Heuristic
+--Input: int X, int M; representing redidue pair X mod M (X and M have to be in ZZ)
+--Output: either Error if reconstruction fails, or a rational p/q satisfying p*q^(-1) mod M = X. The result may be incorrect in some rare cases.
+--Note: Implementation of HRR from paper 'Fault-tolerant modular reconstruction of rational numbers'.
+Define HRR(X,M)
+	CheckArgTypes("HRR", [INT,INT], [X,M]);
+	T:=4096; --threshold
+	Acrit:=10^6;
+	If GCD(X,M)^2>Acrit*M Then Return 0; EndIf;
+	CF := ContFrac(X/M); Amax := Max(CF); Anext := Max([J In CF | J<>Amax]);
+	If Anext<>0 And Amax/Anext<T Then --alternative criterion for avoiding false positives.
+		Error("Rational Reconstruction: Failure");
+	EndIf;
+	U := [1,0,M]; V := [0,1,X]; Q := 0;
+	While Amax<>Q Do
+		Q := $apcocoa/numerical.Floor(U[3]/V[3]);
+		U := U-Q*V; Tmp:=V; V:=U; U:=Tmp;
+	EndWhile;
+	Return X+M*U[1]/U[2];
+EndDefine; --HRR
+
+
+--RatReconstr - Heuristic
+--Input: list L of ints, int M; representing a list of modular numbers L[i] mod M (L and M have to be in ZZ)
+--Output: either Error if reconstruction fails, or list of rationals p[i]/q[i] satisfying p[i]*q[i]^(-1) mod M = L[i]. The result may be incorrect in some rare cases.
+--Note: Implementation of SRR from 'Fault-tolerant modular reconstruction of rational numbers', where no bad moduli is assumed.
+Define RatReconstr(L,M)
+	CheckArgTypes("RatReconstr", [LIST,INT], [L,M]);
+	D:=1; --common denominator --(2)
+	RecL:=[];
+	ForEach X In L Do --(3)
+		RatRec:=$ratReconstr.HRR(Mod(D*X,M),M); --(3.1) --failure is propagated
+		--(3.2) is skipped, as no bad moduli are allowed
+		R:=Num(RatRec); S:=Den(RatRec); --(3.3)
+		Append(RecL,R/(S*D)); --(3.4)
+		D:=S*D;
+	EndForEach;
+	Return RecL;
+EndDefine; --RatReconstr
+
+EndPackage;

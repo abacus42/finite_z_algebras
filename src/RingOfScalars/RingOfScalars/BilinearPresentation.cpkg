@@ -1,0 +1,154 @@
+-- Author: Florian Walsh
+-- This implementation is part of my master thesis. 
+-- A detailed package description is contained in the appendix of the thesis.
+
+Package $BilinearMap
+
+Alias 
+	HNF := $HermiteNF,
+	LS := $LinearSystems;
+
+/*
+	GeneratorCoeffs <- Lists representing the generators of S(f)
+	N_RelCoeffs    	<- Relations of the group N. Each relation such that c_1*a_1 + ... + c_n*a_n = 0 
+						has to be given as a list of coefficients [c_1, c_2, ..., c_n]
+	Computes a presentation of the maximal ring of scalars S(f) of the bilinear map f:N x N -> M
+*/
+Define BilinearPresentation(GeneratorCoeffs, N_RelCoeffs)
+	N := Len(N_RelCoeffs[1]);
+	R := Len(GeneratorCoeffs);
+	S1 ::= QQ[a[1..N], x[1..R]];
+	Using S1 Do
+		GroupGenerators := [a[I] | I In 1..N];
+		Indets := [x[I] | I In 1..R];
+		Generators := $.ComputeGenerators(N, GeneratorCoeffs);
+		
+		Equations := $.RelEquations(N, Generators);
+		Mat := LS.CreateMatrix(GroupGenerators, Indets, Equations, N_RelCoeffs);
+		RelSol := HNF.SolveDioph(Mat);
+		Relations := LS.Keep(R, RelSol);
+		Relations := LS.RemoveZero(Relations);
+		Relations := LS.Interreduce(Relations);
+		PrintLn("Relations of S(f): " + Sprint(Relations));
+		
+		MultTuples := [];
+		For I := 1 To R Do
+			For J := 1 To R Do
+				Equations := $.MultEquations(N, I, J, Generators, GeneratorCoeffs);
+				System := LS.CreateMatrixAffine(GroupGenerators, Indets, Equations, N_RelCoeffs);
+				Sol := HNF.SolveDioph(System.Mat, System.B);
+				Append(MultTuples, First(Sol, R));
+			EndFor;
+		EndFor;
+		PrintLn("Representation of Multiplication: " + Sprint(MultTuples));
+		
+		Equations := $.IdEquations(N, Generators);
+		System := LS.CreateMatrixAffine(GroupGenerators, Indets, Equations, N_RelCoeffs);
+		Sol := HNF.SolveDioph(System.Mat, System.B);
+		IdTuple := First(Sol, R);
+		PrintLn("Representation of the Identity: " + Sprint(IdTuple));
+	EndUsing;
+	S2 ::= QQ[x[1..R]];
+	Using S2 Do
+		IdealGens := $.ListsToPolys(Relations);
+		For I := 1 To R Do
+			For J := 1 To R Do
+				MultPoly := x[I]*x[J];
+				Repr := $.ListsToPolys([MultTuples[(I-1)*R+J]]);
+				MultPoly := MultPoly - Repr[1];
+				Append(IdealGens, MultPoly);
+			EndFor;
+		EndFor;
+		IdPoly := $.ListsToPolys([IdTuple]);
+		IdPoly := IdPoly[1] -1;
+		Append(IdealGens, IdPoly);
+	EndUsing;
+	Return MakeSet(IdealGens);
+EndDefine;
+
+/*
+	Converts lists of coefficients to polynomials in the indeterminates x[I]
+*/
+Define ListsToPolys(List)
+	Polynomials := [];
+	Foreach Coeffs In List Do
+		Poly := 0;
+		For I := 1 To Len(Coeffs) Do
+			Poly := Poly + x[I]*Coeffs[I];
+		EndFor;
+		Append(Polynomials, Poly);
+	EndForeach;
+	Return Polynomials;
+EndDefine;
+
+/*
+	Computes the generators of S(f) out of the coefficients
+*/
+Define ComputeGenerators(N, GeneratorCoeffs)
+	Generators := [];
+	For I := 1 To Len(GeneratorCoeffs) Do
+		Gen := [];
+		For K := 1 To N Do
+			Sum := 0;
+			For J := 1 To N Do
+				Sum := Sum + GeneratorCoeffs[I][K][J] * a[J];
+			EndFor;
+			Append(Gen, Sum);
+		EndFor;
+		Append(Generators, Gen);
+	EndFor;
+	Return Generators;
+EndDefine;
+
+/*
+	Returns equations defining the relations of S(f)
+*/
+Define RelEquations(N, Generators)
+	Equations := [];
+		For J := 1 To N Do
+			EQ := 0;
+			For I := 1 To Len(Generators) Do
+				EQ := EQ + x[I] * Generators[I][J];
+			EndFor;
+			Append(Equations, EQ);
+		EndFor;
+	Return [EQ | EQ In Equations And EQ <> 0];
+EndDefine;
+
+/*
+	Returns equations defining the multiplication of the generators of S(f)
+*/
+Define MultEquations(N, I, J, Generators, GeneratorCoeffs)
+	Equations := [];
+	R := Len(Generators);
+	For K := 1 To N Do
+		EQ := 0;
+		For L := 1 To N Do
+			EQ := EQ + GeneratorCoeffs[J][K][L] * Generators[I][L];
+		EndFor;
+		For Kappa := 1 To R Do
+			EQ := EQ + x[Kappa] * Generators[Kappa][K];
+		EndFor;
+		Append(Equations, EQ);
+	EndFor;
+	Return [EQ | EQ In Equations And EQ <> 0];
+EndDefine;
+
+/*
+	Returns equations defining the identity in S(f)
+*/
+Define IdEquations(N, Generators)
+	Equations := [];
+	R := Len(Generators);
+	For K := 1 To N Do
+		EQ := 0;
+		For I := 1 To R Do
+			EQ := EQ + x[I] * Generators[I][K];
+		EndFor;
+		EQ := EQ + a[K];
+		Append(Equations, EQ);
+	EndFor;
+	Return Equations;
+EndDefine;
+
+EndPackage;

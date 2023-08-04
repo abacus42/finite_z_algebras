@@ -1,0 +1,282 @@
+-- Author: Florian Walsh
+
+Package $StrongGBasisZ
+
+Alias HP := $HelpFunctions;
+
+Define GBasis(...)
+	If Type(ARGV[1]) = LIST Then
+		Return $.GBasisCore(ARGV[1]);
+	Elif Type(ARGV[1]) = IDEAL Then
+		Return $.GBasisCore(Gens(ARGV[1]));
+	Else
+		Error("$strongGBasisZ.GBasis: Bad parameters");
+	EndIf;
+EndDefine;
+
+Define MinimalGBasis(...)
+	If Type(ARGV[1]) = LIST Then
+		GB := $.GBasisCore(ARGV[1]);
+		Return $.Minimalize(GB);
+	Elif Type(ARGV[1]) = IDEAL Then
+		GB := $.GBasisCore(Gens(ARGV[1]));
+		Return $.Minimalize(GB);
+	Else
+		Error("$strongGBasisZ.MinimalGBasis: Bad parameters");
+	EndIf;
+EndDefine;
+
+Define DivAlg(...)
+	If Len(ARGV) = 2 And Type(ARGV[2]) = LIST Then
+		Return $.DivAlgCore(ARGV[1], ARGV[2], False);
+	Elif Len(ARGV) = 3 And Type(ARGV[2]) = LIST And Type(ARGV[3]) = BOOL Then
+		Return $.DivAlgCore(ARGV[1], ARGV[2], ARGV[3]);
+	Else
+		Error("$strongGBasisZ.DivAlg: Bad parameters");
+	EndIf;
+EndDefine;
+
+Define DivAlgCore(Poly, Generators, WithQuotients)
+    Generators := [G | G In Generators And Not(IsZero(G))];
+    Quotients := NewList(Len(Generators),0);
+    If IsZero(Poly) Then
+        If WithQuotients Then
+    		Return Record[Remainder := 0, Quotients := Quotients];
+    	Else
+    		Return 0;
+    	EndIf;
+    EndIf;
+    Remainder := Poly;
+    Found := True;
+    While Found Do
+        Found := False;
+        I := 1;
+        While I <= Len(Generators) And Not(Found) Do
+            If $.IsDivisible(LM(Remainder), LM(Generators[I])) Then
+            	Quotients[I] := Quotients[I] + Cast(LC(Remainder),INT)/Cast(LC(Generators[I]),INT) *LT(Remainder)/LT(Generators[I]);
+                Remainder := $.SPolynomial(Remainder, Generators[I]);         
+                If IsZero(Remainder) Then
+                    If WithQuotients Then
+    					Return Record[Remainder := 0, Quotients := Quotients];
+    				Else
+    					Return Remainder;
+    				EndIf;
+                EndIf;
+                Found := True;
+            EndIf;
+            I := I + 1;
+        EndWhile;
+    EndWhile;
+    If WithQuotients Then
+    	Return Record[Remainder := Remainder, Quotients := Quotients];
+    Else
+    	Return Remainder;
+    EndIf;
+EndDefine;
+
+
+Define SPolynomial(F,G)
+    Numerator := LCM(Cast(LC(F),INT),Cast(LC(G),INT)) * LCM(LT(F),LT(G));
+    Numerator := Numerator * Sign(Cast(LC(F),INT)) * Sign(Cast(LC(G),INT));
+    Return (Numerator/LM(F)) * F - (Numerator/LM(G)) * G;
+EndDefine;
+
+
+Define SCoeffs(F,G)
+	Numerator := LCM(Cast(LC(F),INT),Cast(LC(G),INT)) * LCM(LT(F),LT(G));
+	Numerator := Numerator * Sign(Cast(LC(F),INT)) * Sign(Cast(LC(G),INT));
+	Return [Numerator/LM(F), Numerator/LM(G)];
+EndDefine;
+
+
+Define GcdPolynomial(F,G)
+    TermLcm := LCM(LT(F),LT(G));
+    D := HP.ExtendedGcd(Cast(LC(F),INT),Cast(LC(G),INT));
+    Return ((D[1]*TermLcm)/LT(F))*F+((D[2]*TermLcm)/LT(G))*G;
+EndDefine;
+
+
+Define GcdCoeffs(F,G)
+    TermLcm := LCM(LT(F),LT(G));
+    D := HP.ExtendedGcd(Cast(LC(F),INT),Cast(LC(G),INT));
+    Return [(D[1]*TermLcm)/LT(F), (D[2]*TermLcm)/LT(G)];
+EndDefine;
+
+
+Define GBasisCore(Generators)
+    GB := [G | G In Generators And Not(IsZero(G))];
+    PairList := [];
+    For J := 2 To Len(Generators) Do
+        For I := 1 To J-1 Do
+            Append(PairList, [I,J]);
+        EndFor;
+    EndFor;
+    While Len(PairList) > 0 Do
+        Pair := PairList[1];
+        Remove(PairList, 1);
+        Polynomials := [];
+        If $.IsNecessaryGcdPair(GB[Pair[1]], GB[Pair[2]]) Then
+        	Append(Polynomials, $.GcdPolynomial(GB[Pair[1]], GB[Pair[2]]));
+        EndIf;
+        If $.IsNecessarySPair(GB[Pair[1]], GB[Pair[2]]) Then
+        	Append(Polynomials, $.SPolynomial(GB[Pair[1]], GB[Pair[2]]));
+        EndIf;
+        Foreach Polynomial In Polynomials Do
+            Remainder := $.DivAlgCore(Polynomial, GB, False);
+            If Not(IsZero(Remainder)) Then
+            	If LC(Remainder) < 0 Then
+            		Remainder := -1 *Remainder;
+            	EndIf;
+                Append(GB, Remainder);
+                For I := 1 To Len(GB)-1 Do
+                    Append(PairList, [I, Len(GB)]);
+                EndFor;
+            EndIf;
+        EndForeach;
+    EndWhile;
+    SortBy(GB,Function("$StrongGBasisZ.ByTermOrder"));
+    Return GB;
+EndDefine;
+
+
+Define ExtendedGBasis(Generators)
+	Basis := [G | G In Generators And Not(IsZero(G))];
+	Matrix := Identity(Len(Basis));
+    PairList := [];
+    For J := 2 To Len(Generators) Do
+        For I := 1 To J-1 Do
+        	Append(PairList, [I,J]);
+        EndFor;
+    EndFor;
+    While Len(PairList) > 0 Do
+        Pair := PairList[1];
+        Remove(PairList, 1);
+        If $.IsNecessarySPair(Basis[Pair[1]], Basis[Pair[2]]) Then
+        SPoly := $.SPolynomial(Basis[Pair[1]], Basis[Pair[2]]);
+        Result := $.DivAlg(SPoly, Basis, True);
+        If Not(IsZero(Result.Remainder)) Then
+        	Columns := ColumnVectors(Matrix);
+        	NewColumn := NewVector(Len(Matrix));
+        	For I := 1 To Len(Basis) Do
+        		NewColumn := NewColumn - Result.Quotients[I] * Columns[I];
+        	EndFor;
+        	Coeffs := $.SCoeffs(Basis[Pair[1]], Basis[Pair[2]]);
+        	NewColumn := NewColumn + Columns[Pair[1]]*Coeffs[1] - Columns[Pair[2]]*Coeffs[2];
+        	If LC(Result.Remainder) < 0 Then
+        		Result.Remainder := -1 * Result.Remainder;
+        		NewColumn := -1 *NewColumn;
+        	EndIf;
+        	Matrix := MatConcatHor(Matrix, Transposed(Mat(NewColumn)));
+        	Append(Basis, Result.Remainder);
+        	For I := 1 To Len(Basis)-1 Do
+        		Append(PairList, [I, Len(Basis)]);
+        	EndFor;
+        EndIf;
+        EndIf;
+        
+        If $.IsNecessaryGcdPair(Basis[Pair[1]], Basis[Pair[2]]) Then
+        GcdPoly := $.GcdPolynomial(Basis[Pair[1]], Basis[Pair[2]]);
+        Result := $.DivAlg(GcdPoly, Basis, True);
+        If Not(IsZero(Result.Remainder)) Then
+        	Columns := ColumnVectors(Matrix);
+        	NewColumn := NewVector(Len(Matrix));
+        	For I := 1 To Len(Basis) Do
+        		NewColumn := NewColumn - Result.Quotients[I] * Columns[I];
+        	EndFor;
+        	Coeffs := $.GcdCoeffs(Basis[Pair[1]],Basis[Pair[2]]);
+        	NewColumn := NewColumn + Columns[Pair[1]]*Coeffs[1] + Columns[Pair[2]]*Coeffs[2];
+        	If LC(Result.Remainder) < 0 Then
+        		Result.Remainder := -1 * Result.Remainder;
+        		NewColumn := -1 * NewColumn;
+        	EndIf;
+        	Matrix := MatConcatHor(Matrix, Transposed(Mat(NewColumn)));
+        	Append(Basis, Result.Remainder);
+        	For I := 1 To Len(Basis)-1 Do
+        		Append(PairList, [I, Len(Basis)]);
+        	EndFor;
+        EndIf;
+        EndIf;
+    EndWhile;
+    Return Record[GB := Basis, Matrix := Matrix];
+EndDefine;
+
+Define Minimalize(Generators)
+    Generators := [G | G In Generators And Not(IsZero(G))];
+    MinGens := Generators;
+    Minimal := False;
+    While Not(Minimal) Do
+        Minimal := True;
+        For I := 1 To Len(MinGens) Do
+            Reduced := $.DivAlg(MinGens[I], WithoutNth(MinGens, I));
+            If LC(Reduced) < 0 Then
+            	Reduced := -1 * Reduced;
+            EndIf;
+            If Reduced <> MinGens[I] Then
+                MinGens[I] := Reduced;
+                Minimal := False;
+            EndIf;
+        EndFor;
+        MinGens := [G | G In MinGens And Not(IsZero(G))];
+    EndWhile;
+    SortBy(MinGens,Function("$StrongGBasisZ.ByTermOrder"));
+    Return MinGens;
+EndDefine;
+
+Define IsDivisible(A, B)
+	Return Den(LC(A)/LC(B)) = 1 And Den(LT(A)/LT(B)) = 1;
+EndDefine;
+
+Define NF(Poly, GB)
+	RedPoly := $.DivAlg(Poly, GB);
+	Found := True;
+    While Found Do
+        Found := False;
+        I := 1;
+        Monomials := Monomials(RedPoly);
+        While I <= Len(Monomials) And Not(Found) Do
+        	J := 1;
+        	While J <= Len(GB) And Not(Found) Do
+            	If $.IsDivisible(LT(Monomials[I]), LT(GB[J])) Then
+            		Quotient := Div(Cast(LC(Monomials[I]),INT),Cast(LC(GB[J]),INT));
+            		If Quotient < 0 Then
+            			Quotient := Quotient -1;
+            		EndIf;
+                	RedPoly := RedPoly - Quotient*(LT(Monomials[I])/LT(GB[J]))*GB[J];
+                	If IsZero(RedPoly) Then
+                    	Return 0;
+                	EndIf;
+                	If Not(IsZero(Quotient)) Then
+                		Found := True;
+                	EndIf;
+            	EndIf;
+            	J := J + 1;
+            EndWhile;
+            I := I + 1;
+        EndWhile;
+    EndWhile;
+    Return RedPoly;
+EndDefine;
+
+Define ByTermOrder(S,T)
+	Return LT(S) < LT(T);
+EndDefine;
+
+Define IsNecessaryGcdPair(F,G)
+	LCF := Cast(LC(F), INT);
+	LCG := Cast(LC(G), INT);
+	If Mod(LCG, LCF) = 0 Then
+		Return False;
+	EndIf;
+	Return True;
+EndDefine;
+
+Define IsNecessarySPair(F,G)
+	LCF := Cast(LC(F), INT);
+	LCG := Cast(LC(G), INT);
+	If GCD(LCG, LCF) = 1 And GCD(LT(F), LT(G)) = 1 Then
+		Return False;
+	EndIf;
+	Return True;
+EndDefine;
+
+EndPackage;

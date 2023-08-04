@@ -1,0 +1,56 @@
+-- Author: Florian Walsh
+-- This implementation is part of my master thesis. 
+-- A detailed package description is contained in the appendix of the thesis.
+
+Package $HelpFunctions
+
+Define About()
+  PrintLn "
+    Author : Florian Walsh
+    Comment: This package contains help functions that are used across multiple other packages
+  "
+EndDefine;
+
+Define ExtendedGcdPos(A, B)
+	Result := [0, 0];
+	If B = 0 Then
+		Result[1] := 1;
+	Else 
+		Temp := $.ExtendedGcdPos(B, Mod(A,B));
+		Result[1] := Temp[2];
+		Result[2] := Temp[1] - $.Floor(A, B)* Temp[2];
+	EndIf;
+	Return Result;	
+EndDefine;
+
+Define ExtendedGcd(A, B)
+	Solution := $.ExtendedGcdPos(Abs(A), Abs(B));
+   	If A < 0 Then
+		Solution[1] := -Solution[1];
+	EndIf;
+	If B < 0 Then
+		Solution[2] := -Solution[2];
+	EndIf;
+	Return Solution
+EndDefine;
+
+Define Floor(A, B)
+	A := Cast(A, INT);
+	B := Cast(B, INT);
+	Result := Round(A, B);
+	If Result > A/B Then
+		Result := Result -1;
+	EndIf;
+	Return Result;
+EndDefine;
+
+-- the builtin Div gives wrong results if the first argument is negative
+Define MyDiv(A,B)
+	If Sign(A) = -1 Then
+		Sgn := Sign(A)*Sign(B);
+		Return Sgn* Div(Abs(A), Abs(B));
+	EndIf;
+	Return Div(A,B);
+EndDefine;
+
+EndPackage;

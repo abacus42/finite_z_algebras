@@ -1,0 +1,314 @@
+-- Author: Florian Walsh
+-- This implementation is part of my master thesis. 
+-- A detailed package description is contained in the appendix of the thesis.
+
+Package $LinearSystems
+
+Alias HNF := $HermiteNF;
+
+/*
+	Equations 		<- List of equations
+	Indets	  		<- Indeterminates used in the equations
+	GroupGenerators <- Indeterminates that represent the group generators
+	RelCoeffs		<- Coefficients of the group relations 
+	Creates a matrix that defines a homogeneous system of equations over a finitely presented group
+*/
+Define CreateMatrix(GroupGenerators, Indets, Equations, RelCoeffs)
+	GenNum := Len(GroupGenerators);
+	Matrix := [];
+	RelIndex := 0;
+	If Equations = [] Or Equations = [0] Then
+		Return NewMat(1,Len(Indets),0);
+	EndIf;
+	Foreach EQ In Equations Do
+		AppearingIndets := [];
+		SubstEquations := [];
+		For I := 1 To GenNum Do
+			SubstEQ := 0;
+			Foreach Mon In Monomials(EQ) Do
+				If Den(Mon/GroupGenerators[I]) = 1 Then
+					SubstEQ := SubstEQ + Mon/GroupGenerators[I];
+					If Not I IsIn AppearingIndets Then
+						Append(AppearingIndets, I);
+					EndIf;
+				EndIf;
+			EndForeach;
+			Append(SubstEquations, SubstEQ);
+		EndFor;
+		SubstEquations := $.RemoveZero(SubstEquations);
+		
+		Rows := [];
+		Foreach EQ In SubstEquations Do
+			Row := [];
+			For J := 1 To Len(Indets) Do
+				Append(Row, Cast(CoeffOfTerm(Indets[J],EQ),INT));
+			EndFor;
+			Padding := NewList(RelIndex, 0);
+			Row := Concat(Row, Padding);
+			Append(Rows, Row);
+		EndForeach;
+		
+		NecessaryRels := [];
+		Foreach Relation In RelCoeffs Do
+			If IsSubset($.NonZeroPositions(Relation), AppearingIndets) Then
+				Append(NecessaryRels, Relation);
+			EndIf;
+		EndForeach;
+		Foreach Relation In NecessaryRels Do
+			For I := 1 To Len(AppearingIndets) Do
+				Index := AppearingIndets[I];
+				Append(Rows[I], -Relation[Index]);
+			EndFor;
+		EndForeach;
+		RelIndex := RelIndex + Len(NecessaryRels);
+		Matrix := Concat(Matrix, Rows);
+	EndForeach;
+	Return Mat($.MakeRectangular(Matrix));
+EndDefine;
+
+
+Define NonZeroPositions(List)
+	Positions := [];
+	For I := 1 To Len(List) Do
+		If List[I] <> 0 Then
+			Append(Positions, I);
+		EndIf;
+	EndFor;
+	Return Positions;
+EndDefine;
+
+-- make a given list of lists retangular by padding each list it with zeros at the end
+Define MakeRectangular(List)
+	Maximum := Max([Len(X) | X In List]);
+	For I := 1 To Len(List) Do
+		Diff := Maximum - Len(List[I]);
+		Padding := NewList(Diff, 0);
+		List[I] := Concat(List[I], Padding);
+	EndFor;
+	Return List;
+EndDefine;
+
+Define CreateMatrixAffine(GroupGenerators, Indets, Equations, RelCoeffs)
+	If Equations = [] Then
+		Return Record[Mat := NewMat(1,Len(Indets),0), B := NewMat(1,1,0)];
+	EndIf;
+	GenNum := Len(GroupGenerators);
+	Constant := [];
+	Matrix := [];
+	RelIndex := 0;
+	NumRows := 0;
+	Foreach EQ In Equations Do
+		AppearingIndets := [];
+		SubstEquations := [];
+		For I := 1 To GenNum Do
+			SubstEQ := 0;
+			ZeroRow := True;
+			Foreach Mon In Monomials(EQ) Do
+				If Den(Mon/GroupGenerators[I]) = 1 Then
+					If Deg(Mon/GroupGenerators[I]) = 0 Then
+						Append(Constant, Cast(Mon/GroupGenerators[I], INT));
+						ZeroRow := False;
+					Else
+						SubstEQ := SubstEQ + Mon/GroupGenerators[I];
+						ZeroRow := False;
+					EndIf;
+					If Not I IsIn AppearingIndets Then
+						Append(AppearingIndets, I);
+					EndIf;
+				EndIf;
+			EndForeach;
+			If Not ZeroRow Then
+				Append(SubstEquations, SubstEQ);
+				NumRows := NumRows + 1;
+			EndIf;
+			If NumRows > Len(Constant) Then
+				Append(Constant, 0);
+			EndIf;
+		EndFor;
+			
+		Rows := [];
+		Foreach EQ In SubstEquations Do
+			Row := [];
+			For J := 1 To Len(Indets) Do
+				Append(Row, Cast(CoeffOfTerm(Indets[J],EQ),INT));
+			EndFor;
+			Padding := NewList(RelIndex, 0);
+			Row := Concat(Row, Padding);
+			Append(Rows, Row);
+		EndForeach;
+			
+		NecessaryRels := [];
+		Foreach Relation In RelCoeffs Do
+			If IsSubset($.NonZeroPositions(Relation), AppearingIndets) Then
+				Append(NecessaryRels, Relation);
+			EndIf;
+		EndForeach;
+		Foreach Relation In NecessaryRels Do
+			For I := 1 To Len(AppearingIndets) Do
+				Index := AppearingIndets[I];
+				Append(Rows[I], -Relation[Index]);
+			EndFor;
+		EndForeach;
+		RelIndex := RelIndex + Len(NecessaryRels);
+		Matrix := Concat(Matrix, Rows);
+	EndForeach;
+	Return Record[Mat := Mat($.MakeRectangular(Matrix)), B := Transposed(Mat([Constant]))];
+EndDefine;
+
+
+--	Keep only the first 'Length' components of each list in 'List' and remove duplicates
+Define Keep(Length, List)
+	For I := 1 To Len(List) Do
+		List[I] := First(List[I], Length);
+	EndFor;
+	Return MakeSet(List);
+EndDefine;
+
+/*
+	Speed up computation by splitting a system of equations into smaller systems and computing
+	their intersection
+	GroupGenerators <- List of indeterminates representing the group generators
+*/
+Define Solve(Equations, GroupGenerators, Indets, RelCoeffs, Red_RelCoeffs, N)
+	Split := [];
+	Chunk_Size := 10000000;
+	If Len(Equations) > Chunk_Size Then
+		ExtRelCoeffs := $.ExtendRelCoeffs(Red_RelCoeffs);
+		Split_Num := Div(Len(Equations), Chunk_Size);
+		For I := 1 To Split_Num Do
+			Append(Split, [Equations[J] | J In ((I-1)*Chunk_Size+1)..I*Chunk_Size]);
+		EndFor;
+		Remainder := Mod(Len(Equations), Chunk_Size);
+		If Remainder <> 0 Then
+			Append(Split, Last(Equations, Remainder));
+		EndIf;
+		Solutions := [];
+		Foreach System In Split Do
+			Mat := $.CreateMatrix(GroupGenerators, Indets, System, RelCoeffs);
+			Sol := $.Keep(N^2, HNF.SolveDioph(Mat));
+			Sol := $.Interreduce(Sol);
+			Sol := $.Reduce(Sol, Red_RelCoeffs);
+			Append(Solutions, Sol);
+		EndForeach;
+		Sol := Solutions[1];
+		For I := 2 To Len(Solutions) Do
+			Sol := $.Intersect(Sol, Solutions[I], Red_RelCoeffs);
+			Sol := $.Reduce(Sol, Red_RelCoeffs);
+		EndFor;	
+	Else
+		Mat := $.CreateMatrix(GroupGenerators, Indets, Equations, RelCoeffs);
+		Sol := $.Keep(N^2, HNF.SolveDioph(Mat));
+	EndIf;
+	Sol := $.Interreduce(Sol);
+	Sol := $.Reduce(Sol, Red_RelCoeffs);
+	Return Sol;
+EndDefine;
+
+-- Reduce solution tuples using the relations of the group
+Define Reduce(Tuples, RelCoeffs)
+	If Len(RelCoeffs) = 0 Then
+		Return Tuples;
+	EndIf;
+	N := Len(RelCoeffs[1]);
+	Foreach Coeff In RelCoeffs Do
+		For J := 1 To Len(Tuples) Do
+			ResultTuple := [];
+			For I := 1 To N Do
+				Chunk := [Tuples[J][K] | K In ((I-1)*N+1)..I*N];
+				Divisors := [];
+				For K := 1 To N Do
+					If Coeff[K] <> 0 Then
+						Append(Divisors, Div(Chunk[K], Coeff[K]));
+					EndIf;
+				EndFor;
+				If Len(Divisors) > 0 Then
+					Chunk := Chunk - Min(Divisors) * Coeff;
+				EndIf;
+				ResultTuple := Concat(ResultTuple, Chunk);
+			EndFor;
+			Tuples[J] := ResultTuple;
+		EndFor;
+	EndForeach;
+	Tuples := MakeSet(Tuples);
+	If Len(Tuples) > 1 Then
+		Tuples := $.RemoveZero(Tuples);
+	EndIf;
+	Return Tuples;
+EndDefine;
+
+Define RemoveZero(List)
+	Output := [];
+	Foreach Tuple In List Do
+		If Not IsZero(Vector(Tuple)) Then
+			Append(Output, Tuple);
+		EndIf;
+	EndForeach;
+	Return Output;
+EndDefine;
+
+/*
+	Gens1 		 <- Generators of a linear subspace of Z^n
+	Gens2 		 <- Generators of another linear subspace of Z^n
+	RelCoeffs 	 <- Lists representing the relations
+	Returns the intersection of the two subspaces modulo the relations
+*/
+Define Intersect(Gens1, Gens2, RelCoeffs)
+	ExtRelCoeffs := $.ExtendRelCoeffs(RelCoeffs);
+	If Len(Gens1) = 0 Or Len(Gens2) = 0 Then
+		Return [];
+	EndIf;
+	For I := 1 To Len(Gens2) Do
+		Gens2[I] := -Gens2[I];
+	EndFor;
+	M := Concat(Gens1, Gens2);
+	M := Concat(M, ExtRelCoeffs); 
+	M := Transposed(Mat(M));
+	Sol := HNF.SolveDioph(M);
+	Intersection := [];
+	Foreach Vector In Sol Do
+		Gen := Vector[1]*Gens1[1];
+		For I := 2 To Len(Gens1) Do
+			Gen := Gen + (Vector[I]*Gens1[I]);
+		EndFor;
+		Append(Intersection, Gen);
+	EndForeach;
+	Intersection := MakeSet(Intersection);
+	Intersection := $.Interreduce(Intersection);
+	Intersection := $.Reduce(Intersection, RelCoeffs);
+	Return Intersection;
+EndDefine;
+
+Define ExtendRelCoeffs(RelCoeffs)
+	N := Len(RelCoeffs[1]);
+	ExtendedRelCoeffs := [];
+	Zeros := NewList(N,0);
+	Foreach Rel In RelCoeffs Do
+		For I := 1 To N Do
+			ExtRel := [];
+			For J := 2 To I Do
+				ExtRel := Concat(ExtRel,Zeros);
+			EndFor;
+			ExtRel := Concat(ExtRel, Rel);
+			For J:= I+1 To N Do
+				ExtRel := Concat(ExtRel, Zeros);
+			EndFor;
+			Append(ExtendedRelCoeffs, ExtRel);
+		EndFor;
+	EndForeach;
+	Return ExtendedRelCoeffs;
+EndDefine;
+
+Define Interreduce(Tuples)
+	If Tuples = [] Then
+		Return [];
+	EndIf;
+	M := Mat(Tuples);
+	Hermite := HNF.HermiteNF(M);
+	Result := MakeSet(List(Hermite.H));
+	If Len(Result) > 1 Then
+		Result := $.RemoveZero(Result)
+	EndIf;
+	Return Result;
+EndDefine;
+
+EndPackage;

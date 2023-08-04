@@ -1,0 +1,325 @@
+-- Author: Florian Walsh
+-- This implementation is part of my master thesis. 
+-- A detailed package description is contained in the appendix of the thesis.
+
+Package $FGZModule
+
+Alias 
+	ICZ := $IdealComputationsZ,
+	PD0 := $primDec0,
+	GBZ := $StrongGBasisZ;
+
+Define About()
+  PrintLn "
+    Author : Florian Walsh
+    Comment: Contains functions for ideals I over the integers s.t P/I is a finitely generated Z-module
+  "
+EndDefine;
+
+Define PrimDec(...)
+	If Len(ARGV) = 1 Then
+		GB := GBZ.MinimalGBasis(ARGV[1]);
+		Return $.PrimDecCore(GB);
+	Else
+		Error("$fgZModule.PrimDec: Bad parameters");
+	EndIf;
+EndDefine;
+
+
+Define PrimDecCore(GB) 
+	Q := 0;
+	Foreach Poly In GB Do
+		If Deg(Poly) = 0 Then
+			Q := Cast(Poly, INT);
+		EndIf;
+	EndForeach;	
+	If Q = 0 Then
+		LCs := [Cast(LC(G), INT) | G In GB];
+		H := LCM(LCs);
+		DecompQ := PD0.PrimDec0(Ideal(GB), True);
+		PrimaryComponents := [Ideal(ReducedGBasis(I)) | I In DecompQ.PC];
+		PrimeComponents := [Ideal(ReducedGBasis(I)) | I In DecompQ.MC];
+		Generators := GB;
+		Append(Generators, H);
+		DecompFinite := $.PrimDecCore(Generators);
+		Result := Record[Primary := PrimaryComponents, Prime := PrimeComponents];
+		Intersection := ICZ.Intersect(PrimaryComponents);
+		For I := 1 To Len(DecompFinite.Primary) Do
+			If Not ICZ.ContainedIn(Intersection, DecompFinite.Primary[I]) Then
+				Append(Result.Primary, DecompFinite.Primary[I]);
+				Append(Result.Prime, DecompFinite.Prime[I]);
+			EndIf;
+		EndFor;
+		Return Result;
+	Else
+		Result := Record[Primary := [], Prime := []];
+		Factors := $.PrimeFactors(Abs(Q));
+		Foreach Prime In Factors Do
+			Num := NumIndets();
+			Indets := Indets();
+			--Change to new ring in two steps since it is not possible to change the
+			--coefficient ring and the indeterminates at once
+			S ::= Z/(Prime[1])[x[1..Num]];
+			T ::= QQ[x[1..Num]];
+			Using T Do
+				Phi:=RMap([x[K] | K In 1..Num]);
+				NewIdeal := Image(Ideal(GB), Phi);
+				Using S Do
+					NewIdeal := QZP(NewIdeal);
+					PrimaryComponents := PD0.PrimDec0(NewIdeal);
+					PrimeComponents := [];
+					Foreach Ideal In PrimaryComponents Do
+						Append(PrimeComponents, $.Radical(Ideal));
+					EndForeach;
+				EndUsing;
+				For I := 1 To Len(PrimaryComponents) Do
+					PrimaryComponents[I] := ZPQ(PrimaryComponents[I]);
+					PrimeComponents[I] := ZPQ(PrimeComponents[I]);
+				EndFor;
+			EndUsing;
+			PhiInverse := RMap(Indets);
+			For I := 1 To Len(PrimaryComponents) Do
+				PrimaryComponents[I] := Image(PrimaryComponents[I], PhiInverse);
+				PrimeComponents[I] := Image(PrimeComponents[I], PhiInverse);
+			EndFor;
+			
+			If Prime[2] = 1 Then
+				Foreach Ideal In PrimaryComponents Do
+					Generators := [El | El In Gens(Ideal) And Not El = 0];
+					Append(Generators, Prime[1]);
+					Append(Result.Primary, Ideal(Generators));
+				EndForeach;
+				Foreach Ideal In PrimeComponents Do
+					Generators := [El | El In Gens(Ideal) And Not El = 0];
+					Append(Generators, Prime[1]);
+					Append(Result.Prime, Ideal(Generators));
+				EndForeach;
+			Else
+				Foreach Ideal In PrimeComponents Do
+					Generators := [El | El In Gens(Ideal) And Not El = 0];
+					Append(Generators, Prime[1]);
+					PrimeComp := Ideal(Generators);
+					Append(Result.Prime, PrimeComp);
+					PrimaryComp := ICZ.Colon(Ideal(GB), ICZ.Saturation(Ideal(GB), PrimeComp));
+					Append(Result.Primary, PrimaryComp);
+				EndForeach;
+			EndIf;
+		Endforeach;
+		Return Result;
+	EndIf;
+EndDefine;
+
+
+Define PrimeFactors(N)
+	Smooth := SmoothFactor(N,N);
+	Factors := Smooth[1];
+	List := [];
+	I:=1;
+	While I <= Len(Factors) Do
+		Exp := Count(Factors, Factors[I]);
+		Append(List, [Factors[I], Exp]);
+		I := I + Exp;
+	EndWhile;
+	Return List;
+EndDefine;
+
+-- The builtin Radical does not work in small characteristic
+Define Radical(Ideal)
+	Generators := Gens(Ideal);
+	For I := 1 To Len(Indets()) Do
+		ElimIndets := WithoutNth(Indets(),I);
+		G := Gens(Elim(ElimIndets, Ideal));
+		If G[1] <> 0 Then
+			Factorisation := Factor(G[1]);
+			SquareFree := 1;
+			Foreach El In Factorisation Do
+				SquareFree := SquareFree * El[1];
+			EndForeach;
+			Append(Generators, SquareFree);
+		EndIf;	
+	EndFor;
+	Return Ideal(Interreduced(Generators));
+EndDefine;
+
+
+Define ConnectedComponents(GB)
+	Decomposition := $.PrimDec(GB);
+	PrimaryQ := [];
+	PrimeQ := [];
+	PrimaryFinite := [];
+	PrimeFinite := [];
+	For I := 1 To Len(Decomposition.Primary) Do
+		If ICZ.IntersectionWithZ(Decomposition.Primary[I]) = 0 Then
+			Append(PrimaryQ, Decomposition.Primary[I]);
+			Append(PrimeQ, Decomposition.Prime[I]);
+		Else
+			Append(PrimaryFinite, Decomposition.Primary[I]);
+			Append(PrimeFinite, Decomposition.Prime[I]);
+		EndIf;
+	EndFor;
+	Connected := [];
+	Single := [];
+	UsedMaxComponents := [];
+	For I := 1 To Len(PrimaryQ) Do
+		Component := [PrimaryQ[I]];
+		For J := 1 To Len(PrimaryFinite) Do
+			If ICZ.ContainedIn(PrimeQ[I], PrimeFinite[J]) Then
+				Append(Component, PrimaryFinite[J]);
+				Append(UsedMaxComponents, PrimaryFinite[J]);
+			EndIf;
+		EndFor;
+		If Len(Component) = 1 Then
+			Append(Single, Component[1]);
+		Else
+			Append(Connected, Component);
+		EndIf;
+	EndFor;
+	Connected := $.Union(Connected);
+	Foreach M In PrimaryFinite Do
+		If Not(M IsIn UsedMaxComponents) Then
+			Append(Connected, [M]);
+		EndIf;
+	EndForeach;
+	ConnectedQ := [];
+	For I := 1 To Len(Single) Do
+		Component := [Single[I]];
+		For J := I +1 To Len(Single) Do
+			SumGens := Concat(Gens(Single[I]), Gens(Single[J]));
+			Sum := GBZ.GBasis(Ideal(SumGens));
+			If Not(1 IsIn Sum Or -1 IsIn Sum) Then
+				Append(Component, Single[J]);
+			EndIf;
+		EndFor;
+		Append(ConnectedQ, Component);
+	EndFor;
+	ConnectedQ := $.Union(ConnectedQ);
+	Return Concat(ConnectedQ, Connected);
+EndDefine;
+
+
+Define Union(Components)
+	Disjoint := False;
+	Union := Components;
+	While Not Disjoint Do
+		If Len(Union) < 2 Then
+			Return Union;
+		EndIf;
+		I := 1;
+		Disjoint := True;
+		While (I <= Len(Union)-1) And Disjoint Do
+			J := I + 1;
+			While J <= Len(Union) And Disjoint Do
+				If Intersection(Union[I], Union[J]) <> [] Then
+					Disjoint := False;
+					NewElement := MakeSet(Concat(Union[I],Union[J]));
+					Remove(Union, I);
+					Remove(Union, J - 1);
+					Append(Union, NewElement);
+				EndIf;
+				J := J + 1;
+			EndWhile;
+			I := I + 1;
+		EndWhile;
+	EndWhile;
+	Return Union;
+EndDefine;
+
+
+Define Idempotents(InputIdeal)
+	GB := GBZ.MinimalGBasis(InputIdeal);
+	Connected := $.ConnectedComponents(GB);
+	If Len(Connected) < 2 Then
+		Return [];
+	EndIf;
+	Idempotents := [];
+	Intersections := [ICZ.Intersect(Component) | Component In Connected];
+	If Len(Intersections) = 2 Then
+		Representation := $.OneRepresentation(Intersections[1], Intersections[2]);
+		Return [GBZ.NF(Element, GB) | Element In Representation];
+	EndIf;
+	For I := 1 To Len(Intersections) Do
+		Rest := ICZ.Intersect(WithoutNth(Intersections, I));
+		Representation := $.OneRepresentation(Intersections[I], Rest);
+		Append(Idempotents, Representation[2]);
+	EndFor;
+	Return [GBZ.NF(Element, GB) | Element In Idempotents];
+EndDefine;
+
+
+Define OneRepresentation(Ideal1, Ideal2)
+	Gens1 := Gens(Ideal1);
+	Gens2 := Gens(Ideal2);
+	GensSum := MakeSet(Concat(Gens1, Gens2));
+	Result := GBZ.ExtendedGBasis(GensSum);
+	GB := Result.GB;
+	If Not(1 IsIn GB) Then
+		Error("$fgZModule.OneRepresentation: The Ideals are not comaximal");
+	EndIf;
+	For I := 1 To Len(GB) Do
+		If GB[I] = 1 Then
+			OneIndex := I;
+		EndIf;
+	EndFor;
+	Vectors := ColumnVectors(Result.Matrix);
+	RepVector := Vectors[OneIndex];
+	Q := 0;
+	P := 0;
+	For I := 1 To Len(RepVector) Do
+		If GensSum[I] IsIn Gens1 Then
+			Q := Q + RepVector[I] * GensSum[I];
+		EndIf;
+		If GensSum[I] IsIn Gens2 Then
+			P := P + RepVector[I] * GensSum[I];
+		EndIf;
+	EndFor;
+	Return [Q, P];
+EndDefine;
+
+
+Define Containments(List)
+	For I := 1 To Len(List) Do
+		For J := 1 To Len(List) Do
+			If I <> J Then
+				If ICZ.ContainedIn(List[I],List[J]) Then
+					PrintLn(Sprint(List[I])+" is contained in " + Sprint(List[J]));
+				EndIf;
+			EndIf;
+		EndFor;
+	EndFor;
+EndDefine;
+
+
+Define Comaximality(List)
+	For I := 1 To Len(List) Do
+		For J := I+1 To Len(List) Do
+			SumGens := Concat(Gens(List[I]), Gens(List[J]));
+			Sum := GBZ.MinimalGBasis(Ideal(SumGens));
+			If Not(1 IsIn Sum) Then
+				PrintLn(Sprint(List[I])+" and " + Sprint(List[J]) + " are NOT comaximal.");
+			Else
+				PrintLn(Sprint(List[I])+" and " + Sprint(List[J]) + " are comaximal.");
+			EndIf;
+		EndFor;
+	EndFor;
+EndDefine;
+
+
+Define CheckIdempotents(Idempotents, GB)
+	Foreach Idem In Idempotents Do
+		PrintLn(GBZ.NF(Idem^2, GB));
+	EndForeach;
+	PrintLn("Orthogonality:");
+	For I := 1 To Len(Idempotents)-1 Do
+		For J := I+1  To Len(Idempotents) Do
+			PrintLn(GBZ.NF(Idempotents[I]*Idempotents[J], GB));
+		EndFor;
+	EndFor;
+	PrintLn("Completeness:");
+	Sum := 0;
+	Foreach Idem In Idempotents Do
+		Sum := Sum + Idem;
+	EndForeach;
+	PrintLn(GBZ.NF(Sum, GB));
+EndDefine;
+
+EndPackage;

@@ -1,0 +1,218 @@
+-- Author: Florian Walsh
+-- This implementation is part of my master thesis. 
+-- A detailed package description is contained in the appendix of the thesis.
+
+Package $BilinearMap
+
+Alias LS := $LinearSystems;
+
+/*
+	N 		     <- Number of generators of the group N = <a_1, ..., a_n>
+	M		     <- Number of generators of the group M = <b_1, ..., b_m>
+	MultCoeffs   <- List of lists of lists representing multiplication. We have 
+					a_i * a_j = MultCoeffs[i][j][1] a_1 + ... + MultCoeffs[i][j][n] a_n
+	N_RelCoeffs  <- Relations of the group N. Each relation such that c_1*a_1 + ... + c_n*a_n = 0 
+					has to be given as a list of coefficients [c_1, c_2, ..., c_n] 
+	M_RelCoeffs  <- Relations of the group M. Each relation such that c_1*b_1 + ... + c_m*b_m = 0
+					has to be given as a list of coefficients [c_1, c_2, ..., c_m] 
+	Returns the generators of the maximal ring of scalars S(f) of the bilinear map f:N x N -> M
+*/
+Define BilinearGenerators(MultCoeffs, N_RelCoeffs, M_RelCoeffs, ZSym)
+	N := Len(N_RelCoeffs[1]);
+	M := Len(M_RelCoeffs[1]);
+	If Len(N_RelCoeffs) = 1 And IsZero(Vector(N_RelCoeffs[1])) Then
+		EndGens := List(Identity(N^2));
+	Else
+	S1 ::= QQ[a[1..N], x[1..N, 1..N]];
+	Using S1 Do
+		GroupGenerators := [a[I] | I In 1..N];
+		Indets := [];
+		For I :=1 To N Do
+			For J := 1 To N Do
+				Append(Indets, x[I,J]);
+			EndFor;
+		EndFor;
+		
+		Equations := $.EndEquations(N, N_RelCoeffs);
+		EndGens := LS.Solve(Equations, GroupGenerators, Indets, N_RelCoeffs, N_RelCoeffs, N);
+	EndUsing;
+	EndIf;
+	PrintLn("Generators of End(N): ");
+	$.PrintGens(N, EndGens);
+	
+	S2 ::= QQ[b[1..M], x[1..N, 1..N]];
+	Using S2 Do	
+		GroupGenerators := [b[I] | I In 1..M];
+		Indets := [];
+		For I :=1 To N Do
+			For J := 1 To N Do
+				Append(Indets, x[I,J]);
+			EndFor;
+		EndFor;
+		
+		Equations := $.SymEquations(N, M, MultCoeffs);
+		SymSol := LS.Solve(Equations, GroupGenerators, Indets, M_RelCoeffs, N_RelCoeffs, N);
+		SymGenerators := LS.Intersect(SymSol, EndGens, N_RelCoeffs);
+		PrintLn("Generators of Sym(f): ");
+		$.PrintGens(N, SymGenerators);
+		--$.Verify(Equations, SymGenerators);
+		SymGeneratorsSplit := $.SplitGenerators(N, SymGenerators);
+		
+		Equations := $.ZSymEquations(N, M, MultCoeffs, SymGeneratorsSplit);
+		ZSymSol := LS.Solve(Equations, GroupGenerators, Indets, M_RelCoeffs, N_RelCoeffs, N);
+		ZSymGenerators := LS.Intersect(SymGenerators, ZSymSol, N_RelCoeffs);
+		If ZSym Then
+			Return $.SplitGenerators(N, ZSymGenerators);
+		EndIf;
+		PrintLn("Generators of Z(Sym(f)): ");
+		$.PrintGens(N, ZSymGenerators);
+		
+		Equations := $.TempEquation(N, M, MultCoeffs);
+		TempSol := LS.Solve(Equations, GroupGenerators, Indets, M_RelCoeffs, [], N);
+		TempBasis := $.SplitGenerators(N, TempSol);
+		
+		Equations := $.MaxRingEquations(N, M, MultCoeffs, TempBasis);
+		MaxRingSol := LS.Solve(Equations, GroupGenerators, Indets, M_RelCoeffs, N_RelCoeffs, N);
+		MaxRingGenerators := LS.Intersect(ZSymGenerators, MaxRingSol, N_RelCoeffs);
+		MaxRingGenerators := $.SplitGenerators(N, MaxRingGenerators);
+	EndUsing;
+	Return MaxRingGenerators;
+EndDefine;
+
+
+Define SplitGenerators(Num, List)
+	Generators := [];
+	Foreach Generator In List Do
+		NewList := [];
+		I := 1;
+		While I < Len(Generator) Do
+			Sublist := [];
+			For J := 1 To Num Do
+				Append(Sublist, Generator[I]);
+				I := I + 1;
+			EndFor;
+			Append(NewList, Sublist);
+		EndWhile;
+		Append(Generators, NewList);
+	EndForeach;
+	Return Generators;
+EndDefine;
+
+/*
+	Returns temporary equations needed to compute S(f)
+*/
+Define TempEquation(N, M, MultCoeffs)
+	EQ := 0;
+	For I := 1 To N Do
+		For J := 1 To N Do
+			For Kappa := 1 To M Do
+				EQ := EQ + x[I,J] * MultCoeffs[I][J][Kappa] * b[Kappa];
+			EndFor;
+		EndFor;
+	EndFor;
+	Return [EQ];
+EndDefine;
+
+/*
+	Returns the equations defining the endomorphismen ring End(N)
+*/
+Define EndEquations(N, RelCoeffs)
+	Equations := [];
+	For K := 1 To Len(RelCoeffs) Do
+		EQ := 0;
+		For I := 1 To N Do
+			For J := 1 To N Do
+				EQ := EQ + x[I,J] * RelCoeffs[K][I] * a[J];
+			EndFor;
+		EndFor;
+		Append(Equations, EQ);
+	EndFor;
+	Return Equations;
+EndDefine;
+
+/*
+	Returns the equations defining the ring Sym(f)
+*/
+Define SymEquations(N, M, MultCoeffs)
+	Equations := [];	
+	For K := 1 To N Do
+		For L := 1 To N Do
+			EQ := 0;
+			For I := 1 To N Do
+				For Kappa := 1 To M Do
+					EQ := EQ + x[K,I] * MultCoeffs[I][L][Kappa] * b[Kappa];
+				EndFor;
+			EndFor;
+			For J := 1 To N Do
+				For Kappa := 1 To M Do
+					EQ := EQ - x[L,J] * MultCoeffs[K][J][Kappa] * b[Kappa];
+				EndFor;
+			EndFor;
+			Append(Equations, EQ);
+		EndFor;
+	EndFor;
+	Return [EQ | EQ In Equations And EQ <> 0];
+EndDefine;
+
+/*
+	Returns the equations defining the ring Z(Sym(f))
+*/
+Define ZSymEquations(N, M, MultCoeffs, SymBasis)
+	Equations := [];
+	For K := 1 To N Do
+		For L := 1 To N Do
+			For Pi := 1 To Len(SymBasis) Do
+				EQ := 0;
+				For I := 1 To N Do
+					For J := 1 To N Do
+						For Kappa := 1 To M Do
+					 		EQ := EQ + x[K,I] * SymBasis[Pi][L][J] * MultCoeffs[I][J][Kappa] * b[Kappa]
+					 			- x[L,J] * SymBasis[Pi][K][I] * MultCoeffs[I][J][Kappa] * b[Kappa];
+					 	EndFor;
+					EndFor;
+				EndFor;
+				Append(Equations, EQ);
+			EndFor;
+		EndFor;
+	EndFor;
+	Return [EQ | EQ In Equations And EQ <> 0];
+EndDefine;
+
+/*
+	Returns the equations defining the ring S(f)
+*/
+Define MaxRingEquations(N, M, MultCoeffs, TempBasis)
+	Equations := [];
+	For K := 1 To Len(TempBasis) Do
+		EQ := 0;
+		For I := 1 To N Do
+			For J := 1 To N Do
+				For L := 1 To N Do
+					For Kappa := 1 To M Do
+						EQ := EQ + x[I,L] * TempBasis[K][I][J] * MultCoeffs[L][J][Kappa] * b[Kappa];
+					EndFor;
+				EndFor;
+			EndFor;
+		EndFor;
+		Append(Equations, EQ);
+	EndFor;
+	Return [EQ | EQ In Equations And EQ <> 0];			 	
+EndDefine;
+
+
+Define PrintGens(N, Gens)
+	Foreach Gen In $.SplitGenerators(N, Gens) Do
+		PrintLn("	" + Sprint(Gen));		
+	EndForeach;
+EndDefine;
+
+Define Verify(Equations, Solutions)
+	For I := 1 To Len(Solutions) Do
+		PrintLn("Solution " + Sprint(I));
+		Foreach EQ In Equations Do
+			PrintLn(Eval(EQ, Solutions[I]));
+		EndForeach;
+	EndFor;
+EndDefine;
+
+EndPackage;

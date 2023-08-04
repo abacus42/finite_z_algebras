@@ -1,0 +1,269 @@
+Package $minPoly
+
+Alias
+	MP := $minPoly,
+	RR := $ratReconstr;
+
+Define About()
+  PrintLn "
+    Author: J. Danner
+    Date:  November 2017
+    Comment: Contains algorithms for computing minimal polynomials of F+I in P/I, where I is an ideal in P.
+  "
+EndDefine; -- About
+
+
+--MinPolyQuotElim
+--Input: polynomial F, ideal I, indeterminate X
+--Output: minimal polynomial in CoeffRing[X] of F+I in P/I.
+--Note: I has to be an ideal in CurrentRing(), F a polynomial in CurrentRing() and CoeffRing a field.
+Define MinPolyQuotElim(F,I,X)
+	CheckArgTypes("MinPolyQuotElim", [POLY,IDEAL,POLY], [F,I,X]);
+	Num:=NumIndets();
+	S ::= CoeffRing[y[1..Num],z];
+	Using S Do
+		Phi:=RMap([y[K] | K In 1..Num]);
+		F := Image(F, Phi); --BringIn may be slow (from 'Accessing other Rings'), hence if slow try 'Image'
+		I := Ideal(Image(Gens(I), Phi));
+		J := I + Ideal(z-F);
+		L := Elim([y[K] | K In 1..Num],J);
+		M := L.Gens[1];
+	EndUsing;
+	M :=Sum([LC(MM)*X^(Deg(MM)) | MM In Monomials(M)]);
+	If M=0 Then Return M;
+	Else Return M/LC(M);
+	EndIf;
+EndDefine; --MinPolyQuotElim
+
+
+--MinPolyQuotMat
+--Input: polynomial F, 0-dim ideal I, indeterminate X
+--Output: minimal polynomial in CoeffRing[X] of F+I in P/I.
+--Note: I has to be an ideal in CurrentRing(), F a polynomial in CurrentRing() and CoeffRing a field.
+Define MinPolyQuotMat(F,I,X)
+	CheckArgTypes("MinPolyQuotMat", [POLY,IDEAL,POLY], [F,I,X]);
+	QBasis:=MP.MyQuotientBasis(I);
+	GB:=GBasis(I);
+	--Compute representation of Phi:P/I->P/I, Phi(G)=F*G as matrix PHI
+	F:=NR(F,GB); --remainder F in case it isn't already, s.t. following computations are faster
+	PHI:=Transposed(Mat([[$builtin.CoeffOfTerm(NForm,T) | T In QBasis] | NForm In [NR(T*F, GB) | T In QBasis]]));
+	PHIpower:=Identity(Len(QBasis));
+	
+	EF:=NewMat(Len(QBasis)+1,Len(QBasis)); --echelon form
+	EFC:=NewMat(Len(QBasis)+1,Len(QBasis)+1); --echelon form coefficients, keeps track of linear combinations of original rows
+	EF[1]:=E_(1,Len(QBasis)); --as QBasis[1]=1=Fpower.
+	EFC[1]:=E_(1,Len(QBasis)+1);
+	FNZ:=1; --as QBasis[1]=1. --FirstNonZero(Index) of current row
+	FNZI:=[[FNZ,1],[Len(QBasis)+1,0]]; --FirstNonZeroIndex(List), stores FNZ of each row (second entry needed for (faster) calc. of index K in echelon-updating step)
+	D:=0; --current degree
+	While D<Len(QBasis) Do
+		PHIpower:=PHIpower*PHI;
+		D:=D+1;
+		--PrintLn "Current degree: "+Sprint(D);
+		EF[D+1]:=Vector(Comp(List(Transposed(PHIpower)),1));
+		EFC[D+1]:=E_(D+1,Len(QBasis)+1);
+		--update EF s.t. it is always in echolon form
+		For J:=1 To D Do
+			EFC[D+1]:=EFC[D+1]-EF[D+1][FNZI[J][1]]*EFC[FNZI[J][2]];
+			EF[D+1]:=EF[D+1]-EF[D+1][FNZI[J][1]]*EF[FNZI[J][2]];
+		EndFor;
+		Catch FNZ:=FirstNonZeroPos(EF[D+1]); In E EndCatch;
+		If Type(E)=ERROR Then --FNZ=0, i.e., there is a linear dependency
+			M := Sum([X^(T)*EFC[D+1][T+1] | T In 0..D]);
+			Return M/LC(M);
+		Else
+			EFC[D+1]:=EFC[D+1]*(MapDown(EF[D+1][FNZ]))^(-1);
+			EF[D+1]:=EF[D+1]*(MapDown(EF[D+1][FNZ]))^(-1);
+			K:=Min([K In 1..Len(FNZI) | FNZ<FNZI[K][1]]); --Note: FNZI is always sorted, hence we only need to find the first index K with FNZ<FNZI[K]
+			Insert(FNZI, K, [FNZ, D+1]);
+		EndIf;
+	EndWhile;
+EndDefine; --MinPolyQuotMat
+
+
+--MinPolyQuotDef
+--Input: polynomial F, 0-dim ideal I, (optional) indeterminate X, (optional) K-basis of P/I
+--Output: minimal polynomial in CoeffRing[X] of F+I in P/I, or its coefficients, if X is not given.
+--Note: I has to be an ideal in CurrentRing(), F a polynomial in CurrentRing() and CoeffRing a field.
+Define MinPolyQuotDef(...)
+	--PrintLn "MinPolyQuotDef";
+	If Len(ARGV)=2 Then
+		CheckArgTypes("MinPolyQuotDef", [POLY,IDEAL], ARGV);
+		F:=ARGV[1]; I:=ARGV[2]; X:=Null; QBasis:=MP.MyQuotientBasis(I);
+	Elif Len(ARGV)=3 Then
+		If Type(ARGV[3])=POLY Then
+			CheckArgTypes("MinPolyQuotDef", [POLY,IDEAL,POLY], ARGV);
+			F:=ARGV[1]; I:=ARGV[2]; X:=ARGV[3]; QBasis:=MP.MyQuotientBasis(I);
+		Elif Type(ARGV[3])=LIST Then
+			CheckArgTypes("MinPolyQuotDef", [POLY,IDEAL,LIST], ARGV);
+			F:=ARGV[1]; I:=ARGV[2]; X:=Null; QBasis:=ARGV[3];
+		EndIf;
+	Elif Len(ARGV)=4 Then
+		CheckArgTypes("MinPolyQuotDef", [POLY,IDEAL,POLY,LIST], ARGV);
+		F:=ARGV[1]; I:=ARGV[2]; X:=ARGV[3]; QBasis:=ARGV[4];
+	Else
+		Error("False number of arguments. Input: Poly, Ideal, (optional) Poly, (optional) K-basis of P/I.");
+	EndIf;
+
+	If Len(QBasis)=0 Then
+		If X=Null Then Return [1]; Else Return 1; EndIf; 
+	EndIf;
+	F:=NF(F,I);		
+	Fpower:=1;
+	EF:=NewMat(Len(QBasis)+1,Len(QBasis)); --echelon form
+	EFC:=NewMat(Len(QBasis)+1,Len(QBasis)+1);  --echelon form coefficients, keeps track of linear combinations of original rows
+	EF[1]:=E_(1,Len(QBasis)); --as QBasis[1]=1=Fpower.
+	EFC[1]:=E_(1,Len(QBasis)+1);
+	FNZ:=1; --as QBasis[1]=1. --FirstNonZero(Index)
+	FNZI:=[[FNZ,1],[Len(QBasis)+1,0]]; --FirstNonZeroIndex(List), stores FNZ of each row (second entry needed for (faster) calc. of idx K in echelon-updating step)
+	D:=0;
+	While D<Len(QBasis) Do
+		D:=D+1;
+		--PrintLn "Current degree: "+Sprint(D);
+		Fpower:=NF(Fpower*F, I);
+		EF[D+1]:=Vector([$builtin.CoeffOfTerm(Fpower,B) | B In QBasis]); --faster version of: EF[D+1]:=Coefficients(Fpower, QBasis);
+		EFC[D+1]:=E_(D+1,Len(QBasis)+1);
+		--update EF s.t. it is always in echolon form and store its linear combination of other rows in EFC[D+1]
+		For J:=1 To D Do
+			EFC[D+1]:=EFC[D+1]-EF[D+1][FNZI[J][1]]*EFC[FNZI[J][2]];
+			EF[D+1]:=EF[D+1]-EF[D+1][FNZI[J][1]]*EF[FNZI[J][2]];
+		EndFor;
+		Catch FNZ:=FirstNonZeroPos(EF[D+1]); In E EndCatch;
+		If Type(E)=ERROR Then --there is a linear dependency
+			If X=Null Then --return minPoly as list
+				Return Reversed([MapDown(EFC[D+1][J+1]) | J In 0..D])*(MapDown(EFC[D+1][D+1]))^(-1);			
+			Else --return minPoly as polynomial
+				Return (EFC[D+1][D+1])^(-1)*Sum([X^(T)*EFC[D+1][T+1] | T In 0..D]);
+			EndIf;
+		Else
+			EFC[D+1]:=EFC[D+1]*(MapDown(EF[D+1][FNZ]))^(-1);
+			EF[D+1]:=EF[D+1]*(MapDown(EF[D+1][FNZ]))^(-1);
+			K:=Min([K In 1..Len(FNZI) | FNZ<FNZI[K][1]]); --Note: FNZI is always sorted, hence we only need to find the first index K with FNZ<FNZI[K]
+			Insert(FNZI, K, [FNZ, D+1]);
+		EndIf; --there exists a linear dependency
+	EndWhile;
+	
+EndDefine; --MinPolyQuotDef
+
+
+--MinPolyQuotMod - Heuristic
+--Input: polynomial F, 0-dim ideal I, (optional) indeterminate X, (optional) K-basis of P/I
+--Output: minimal polynomial in CoeffRing[X] of F+I in P/I, or its coefficients, if X is not given.
+--Note: I has to be an ideal in CurrentRing(), F a polynomial in CurrentRing(), CoeffRing a field and CoeffRing=QQ.
+Define MinPolyQuotMod(...)
+	If Characteristic()<>0 Then
+		Error("This function only works in characteristic zero; use MinPolyQuotDef, MinPolyQuotMat or MinPolyQuotElim instead.");
+	EndIf; --now CoeffRing=QQ
+	If Len(ARGV)=3 Then
+		If Type(ARGV[3])=POLY Then
+			CheckArgTypes("MinPolyQuotMod", [POLY,IDEAL,POLY], ARGV);
+			F:=ARGV[1]; I:=ARGV[2]; X:=ARGV[3]; QBasis:=MP.MyQuotientBasis(I);
+		Elif Type(ARGV[3])=LIST Then
+			CheckArgTypes("MinPolyQuotMod", [POLY,IDEAL,LIST], ARGV);
+			F:=ARGV[1]; I:=ARGV[2]; X:=Null; QBasis:=ARGV[3];
+		EndIf;
+	Elif Len(ARGV)=4 Then
+		CheckArgTypes("MinPolyQuotMod", [POLY,IDEAL,POLY,LIST], ARGV);
+		F:=ARGV[1]; I:=ARGV[2]; X:=ARGV[3]; QBasis:=ARGV[4];
+	Else
+		Error("False number of arguments. Input: Poly, Ideal, Poly, (optional) K-basis of P/I.");
+	EndIf;
+
+	--PrintLn "MinPolyQuotMod";
+
+	RGB:=ReducedGBasis(I);
+	F:=NR(F,RGB);
+	DenOverall:=LCM([Den(C) | C In Coefficients(F)])*LCM([Den(GC) | GC In Flatten([Coefficients(G) | G In RGB])]);
+	P:=16001;
+	While Mod(DenOverall,P)=0 Do
+		P:=NextPrime(P);
+	EndWhile; --P is now a usable prime for F in P/I
+	Num:=NumIndets();
+	Tmp::=CoeffRing[x[1..Num]];
+	Using Tmp Do --change variables to x[1..Num] for the rest of the algorithm
+		Psi:=RMap([x[J] | J In 1..Num]);
+		Ftmp:=Image(F,Psi);
+		Itmp:=Ideal(Image(RGB,Psi));
+		QBasistmp:=Image(QBasis,Psi);
+	
+		PR::=ZZ/(P)[x[1..Num]];
+		Using PR Do
+			Fp:=QZP(Ftmp);
+			Ip:=Ideal(QZP(Itmp.Gens));
+			QBasisp:=QZP(QBasistmp);
+			MpCoeff:=MP.MinPolyQuotDef(Fp,Ip,QBasisp);
+			--PrintLn "Prime #1, degree: "+Sprint(Len(MpCoeff)-1);
+		EndUsing;
+		Mcrt:=Record[Mod:=P, Coeff:=[Cast(C,INT) | C In MpCoeff]];	
+		--main loop:
+		
+		--debug info:
+		--UsedPrimes:=[P];		
+		--altering from algorithm: end if one prime already suffices for reconstruction
+		Catch McalcCoeff:=RR.RatReconstr(Mcrt.Coeff,Mcrt.Mod); In E EndCatch;
+		
+		While Type(E)=ERROR Do
+			Repeat 
+				P:=NextPrime(P);
+			Until Mod(DenOverall,P)<>0;
+			--Append(UsedPrimes,P);
+			PR ::= ZZ/(P)[x[1..Num]];
+			Using PR Do
+				Fp:=QZP(Ftmp);
+				Ip:=Ideal(QZP(Itmp.Gens));
+				QBasisp:=QZP(QBasistmp);
+				MpCoeff:=MP.MinPolyQuotDef(Fp,Ip,QBasisp);
+				--PrintLn "Prime #"+Sprint(Len(UsedPrimes))+", degree: "+Sprint(Len(MpCoeff)-1);
+			EndUsing;
+			MpCoeffZZ:=[Cast(C,INT) | C In MpCoeff];
+			If Len(Mcrt.Coeff)<Len(MpCoeff) Then
+				Mcrt:=Record[Mod:=P, Coeff:=MpCoeffZZ];
+			Elif Len(Mcrt.Coeff)=Len(MpCoeff) Then
+				TildeCoeff:=[MP.CRT(MpCoeffZZ[J],P,Mcrt.Coeff[J],Mcrt.Mod) | J In 1..Len(MpCoeffZZ)];
+				TildeMcrt:=Record[Mod:=P*Mcrt.Mod, Coeff:=TildeCoeff];				
+				Catch McalcCoeff:=RR.RatReconstr(TildeMcrt.Coeff,TildeMcrt.Mod); In E EndCatch;
+				Mcrt:=TildeMcrt;
+			EndIf;
+		EndWhile;
+		--PrintLn UsedPrimes;
+	EndUsing;
+	--MagnitudeCoeffs:=[ILogBase(Max([Num(C) | C In McalcCoeff]),10),ILogBase(Max([Den(C) | C In McalcCoeff]),10)];
+	--PrintLn "Info: #Primes: "+Sprint(Len(UsedPrimes))+", Magnitude: (lower bound: 10^i, [Num,Den]) "+Sprint(MagnitudeCoeffs);
+	Return Poly(ScalarProduct(Reversed(McalcCoeff), [X^J | J In 0..Len(McalcCoeff)]));
+EndDefine; --MinPolyQuotMod
+
+
+
+--functions not to be exported
+
+--auxFun: (needed as QuotientBasis fails to throw adequate error for I=Ideal(0).)
+--Input: (0-dim) ideal I
+--Output: K-basis of P/I, and error if I is not 0-dim.
+Define MyQuotientBasis(Var I)
+	--PrintLn "MP.MyQuotientBasis";
+	If I=Ideal(0) Then Error("MyQuotientBasis: argument must be a 0-dim ideal"); EndIf;
+	NoPrint:=GBasis(I); --store GBasis in I (QuotientBasis does not do that!)
+	Return QuotientBasis(I);
+EndDefine; --MyQuotientBasis
+
+
+--auxFun: compute X in ZZ with X=A1 mod P1 and X=A2 mod P2, where P1 and P2 are coprime.
+--Note: all arguments must be in ZZ.
+Define CRT(A1,P1,A2,P2)
+	--ExtEuklid for P1 and P2 (Note P1>1, P2>1)
+	L1 := [1,0,P1];
+   	L2 := [0,1,P2];
+    If L1[3]<L2[3] Then
+    L := L1; L1 := L2; L2 := L;
+    EndIf;
+    Repeat
+    	Q := Div(L1[3],L2[3]);
+    	E := L1[3]-Q*L2[3];
+    	V := L1; L1 := L2;
+    	L2 := [V[1]-Q*L2[1], V[2]-Q*L2[2],E];	
+    Until L2[3]=0;
+	--If L[3]<>1 Then Error("CRT: Input modulus are not coprime."); EndIf;
+	Return Mod(A2*P1*L1[1]+A1*P2*L1[2],P1*P2);
+EndDefine; --CRT
+
+EndPackage;
